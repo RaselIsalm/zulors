@@ -30,10 +30,11 @@ user's network upload speed. Browser playback also depends on the codec inside
 the original container; the upload API checks declared type and R2 size/type
 metadata but does not inspect the video bitstream or prove its duration.
 
-The optional Reels HLS worker runs FFmpeg on the existing `media-video-normal`
-queue after a verified R2 MP4 is published. It keeps that MP4 as the canonical
-playback source and writes separate 240p/360p/480p/720p HLS renditions to the
-final R2 disk when the source resolution supports them. The HLS files can
+The post video worker preserves the original R2 upload before legacy
+optimization creates a playback MP4. Reels HLS runs FFmpeg on the existing
+`media-video-normal` queue and reads that original when available, then writes
+separate 240p/360p/480p/720p/1080p renditions to the final R2 disk when the
+source resolution supports them. The HLS files can
 increase total storage, and the worker adds CPU cost; they are for adaptive
 playback on constrained networks, not a claim that the original file was
 compressed. The post stays playable from its MP4 while this work runs or fails.

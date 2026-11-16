@@ -11,9 +11,9 @@ use Illuminate\Console\Command;
 
 class ReconcileReelHlsProcessing extends Command
 {
-    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing}';
+    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--rebuild : Queue videos without the current HLS encoding version} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
 
-    protected $description = 'Requeue stale or explicitly selected failed post-video HLS jobs.';
+    protected $description = 'Requeue stale, failed, or outdated post-video HLS jobs.';
 
     public function handle(ReelsHlsRollout $rollout): int
     {
@@ -30,24 +30,39 @@ class ReconcileReelHlsProcessing extends Command
             ->where('status', MediaStatus::PROCESSED->value)
             ->where('metadata->provider', 'r2');
 
-        $query->where(function ($states) use ($cutoff): void {
-            $states->where(function ($stale) use ($cutoff): void {
-                $stale->whereIn('metadata->background_processing_state', ['queued', 'processing'])
-                    ->where(function ($timestamp) use ($cutoff): void {
-                        $timestamp->where('metadata->background_processing_updated_at', '<=', $cutoff)
-                            ->orWhere(function ($missing) use ($cutoff): void {
-                                $missing->whereNull('metadata->background_processing_updated_at')
-                                    ->where('metadata->background_processing_dispatched_at', '<=', $cutoff);
+        if ($this->option('rebuild')) {
+            $query
+                ->where('mediaable_type', \App\Models\Post::class)
+                ->where(function ($version): void {
+                    $version->whereNull('metadata->playback->encoding_version')
+                        ->orWhere('metadata->playback->encoding_version', '<>', GeneratePostVideoHls::ENCODING_VERSION);
+                })
+                ->where(function ($state): void {
+                    $state->whereNull('metadata->background_processing_state')
+                        ->orWhereNotIn('metadata->background_processing_state', ['queued', 'processing']);
+                })
+                ->orderBy('id');
+        } else {
+            $query->where(function ($states) use ($cutoff): void {
+                $states->where(function ($stale) use ($cutoff): void {
+                    $stale->whereIn('metadata->background_processing_state', ['queued', 'processing'])
+                        ->where(function ($timestamp) use ($cutoff): void {
+                            $timestamp->where('metadata->background_processing_updated_at', '<=', $cutoff)
+                                ->orWhere(function ($missing) use ($cutoff): void {
+                                    $missing->whereNull('metadata->background_processing_updated_at')
+                                        ->where('metadata->background_processing_dispatched_at', '<=', $cutoff);
+                                });
                             });
                     });
+
+                if ($this->option('retry-failed')) {
+                    $states->orWhere('metadata->background_processing_state', 'failed');
+                }
             });
+        }
 
-            if ($this->option('retry-failed')) {
-                $states->orWhere('metadata->background_processing_state', 'failed');
-            }
-        });
-
-        $mediaItems = $query->limit(200)->get();
+        $limit = max(1, min(200, (int) $this->option('limit')));
+        $mediaItems = $query->limit($limit)->get();
 
         foreach ($mediaItems as $media) {
             $metadata = $media->metadata ?? [];

@@ -6,6 +6,7 @@ use Exception;
 use App\Models\Post;
 use App\Constants\Filesystem;
 use FFMpeg\Coordinate\Dimension;
+use App\Services\Media\Cloudflare\R2DirectUploadService;
 use App\Services\Media\Publication\MediaEncodingProfile;
 use App\Enums\Post\PostStatus;
 use FFMpeg\Filters\Video\ResizeFilter;
@@ -39,7 +40,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
         $this->timeout = max(60 * 30, (int) config('post.processing.video.timeout', $this->timeout));
     }
 
-    public function handle(): void
+    public function handle(R2DirectUploadService $r2DirectUploadService): void
     {
         $postMedia = null;
         $videoUploadService = null;
@@ -143,6 +144,17 @@ class ConvertAndCompressPostVideo implements ShouldQueue
             if(file_exists($videoNewAbsLocalPath)) {
                 $targetDisk = $this->targetStorageDisk($postMedia);
                 $videoPresentationMetadata = $this->videoPresentationMetadata($videoUploadService, $videoNewAbsLocalPath);
+                $oldDisk = $postMedia->disk;
+                $oldPath = $postMedia->source_path;
+                $oldSize = (int) $postMedia->size;
+                $originalStorage = $this->preserveOriginalSource(
+                    $postMedia,
+                    $oldDisk,
+                    $oldPath,
+                    $oldSize,
+                    $remoteSource,
+                    $r2DirectUploadService
+                );
 
                 $this->updateProcessingProgress($postMedia, 88, 'thumbnailing');
 
@@ -159,9 +171,6 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                     ->setNamespace(Filesystem::mediaNamespace('posts/videos'))
                     ->upload($videoNewAbsLocalPath);
 
-                $oldDisk = $postMedia->disk;
-                $oldPath = $postMedia->source_path;
-                $oldSize = (int) $postMedia->size;
                 $metadata = $postMedia->metadata ?? [];
 
                 $postMedia->source_path = $videoData['video_path'];
@@ -180,6 +189,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                     'background_processing_state' => 'processed',
                     'background_processing_progress' => 100,
                     'original_size' => $oldSize,
+                    'original_storage' => $originalStorage,
                     'optimized_size' => (int) $postMedia->size,
                     'optimization_ratio' => $this->optimizationRatio($oldSize, (int) $postMedia->size),
                 ]);
@@ -188,6 +198,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                 $this->postData->status = PostStatus::ACTIVE;
 
                 $this->postData->save();
+                app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($postMedia->refresh());
 
                 if(config('logging.debugging.video_process_logging')) {
                     $fileNewExists = file_exists($videoNewAbsLocalPath) ? 'Yes' : 'No';
@@ -453,6 +464,71 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                 }
             }
         }
+    }
+
+    private function preserveOriginalSource(
+        $media,
+        string $sourceDisk,
+        string $sourcePath,
+        int $sourceSize,
+        bool $remoteSource,
+        R2DirectUploadService $r2DirectUploadService
+    ): array {
+        $extension = strtolower((string) ($media->extension ?: 'mp4'));
+        if(! preg_match('/\A[a-z0-9]{2,8}\z/', $extension)) {
+            $extension = 'mp4';
+        }
+
+        $prefix = 'uploads/posts/videos/originals/'.$media->id;
+        $mime = (string) ($media->mime ?: 'video/mp4');
+
+        if($remoteSource) {
+            $archive = $r2DirectUploadService->publishUploadedObject(
+                $sourcePath,
+                $prefix,
+                $extension,
+                $mime,
+                $sourceDisk,
+                false
+            );
+
+            if((int) $archive['size'] !== $sourceSize) {
+                throw new \RuntimeException('Archived original size does not match the uploaded source.');
+            }
+
+            return [
+                'disk' => $archive['disk'],
+                'path' => $archive['path'],
+                'extension' => $extension,
+                'mime' => $mime,
+                'size' => (int) $archive['size'],
+            ];
+        }
+
+        $archiveDisk = $sourceDisk;
+        $archivePath = $prefix.'/'.hash('sha256', $sourceDisk.'|'.$sourcePath).'.'.$extension;
+        $storage = Storage::disk($archiveDisk);
+
+        if(! $storage->exists($sourcePath)) {
+            throw new \RuntimeException('Original video source is unavailable for safe processing.');
+        }
+
+        if(! $storage->exists($archivePath) && ! $storage->copy($sourcePath, $archivePath)) {
+            throw new \RuntimeException('Unable to preserve the original video source.');
+        }
+
+        $archiveSize = (int) $storage->size($archivePath);
+        if($archiveSize < 1 || $archiveSize !== $sourceSize) {
+            throw new \RuntimeException('Archived original size does not match the uploaded source.');
+        }
+
+        return [
+            'disk' => $archiveDisk,
+            'path' => $archivePath,
+            'extension' => $extension,
+            'mime' => $mime,
+            'size' => $archiveSize,
+        ];
     }
 
     private function optimizationRatio(int $oldSize, int $newSize): int

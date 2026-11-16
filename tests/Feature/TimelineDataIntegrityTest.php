@@ -88,6 +88,7 @@ class TimelineDataIntegrityTest extends TestCase
     {
         Event::fake([MediaUpdatedEvent::class, MediaProcessedEvent::class, PublicTimelinePostCreatedEvent::class]);
         $original = $this->createVideoFixture();
+        app()->instance(R2DirectUploadService::class, new \Tests\Support\FakeR2DirectUploadService());
         $owner = $this->createUser('ffmpeg-retry-owner');
         $post = $this->createPost($owner, 'Retry video', null, ['status' => PostStatus::PROCESSING_VIDEO, 'type' => PostType::VIDEO]);
         $media = $post->media()->create($original);
@@ -97,7 +98,7 @@ class TimelineDataIntegrityTest extends TestCase
         $brokenService->shouldReceive('getFFMpeg')->once()->andThrow(new \RuntimeException('Simulated FFmpeg failure'));
         app()->instance($serviceClass, $brokenService);
         try {
-            (new ConvertAndCompressPostVideo($post))->handle();
+            (new ConvertAndCompressPostVideo($post))->handle(app(R2DirectUploadService::class));
             $this->fail('The FFmpeg error must reach the queue worker.');
         }
         catch (\RuntimeException $e) {
@@ -108,7 +109,7 @@ class TimelineDataIntegrityTest extends TestCase
         \Illuminate\Support\Facades\Storage::disk('r2_temp')->assertExists($original['source_path']);
         \Illuminate\Support\Facades\Storage::disk('r2_final')->assertDirectoryEmpty('/');
         app()->instance($serviceClass, $realService);
-        (new ConvertAndCompressPostVideo($post))->handle();
+        (new ConvertAndCompressPostVideo($post))->handle(app(R2DirectUploadService::class));
         $this->assertOptimizedVideo($media, $original);
     }
 
@@ -125,13 +126,14 @@ class TimelineDataIntegrityTest extends TestCase
         $this->assertDatabaseCount('posts', 0);
     }
 
-    public function test_real_ffmpeg_worker_optimizes_temp_video_and_removes_original(): void
+    public function test_real_ffmpeg_worker_keeps_an_exact_original_archive_and_optimizes_playback_video(): void
     {
         $binary = (new \Symfony\Component\Process\ExecutableFinder())->find('ffmpeg');
         if(! $binary) $this->markTestSkipped('FFmpeg is required for the media integration test.');
         Event::fake([MediaUpdatedEvent::class, MediaProcessedEvent::class, PublicTimelinePostCreatedEvent::class]);
         \Illuminate\Support\Facades\Storage::fake('r2_temp');
         \Illuminate\Support\Facades\Storage::fake('r2_final');
+        app()->instance(R2DirectUploadService::class, new \Tests\Support\FakeR2DirectUploadService());
         $large = getenv('MEDIA_LARGE_FIXTURE_TEST') === '1';
         $source = 'tmp/direct/videos/integration.avi';
         $disk = \Illuminate\Support\Facades\Storage::disk('r2_temp');
@@ -143,6 +145,7 @@ class TimelineDataIntegrityTest extends TestCase
         ]);
         $process->setTimeout(120)->mustRun();
         $originalSize = $disk->size($source);
+        $originalSha256 = hash_file('sha256', $disk->path($source));
         if($large) $this->assertGreaterThan(500 * 1024 * 1024, $originalSize);
         $owner = $this->createUser('real-ffmpeg-owner');
         $post = $this->createPost($owner, 'FFmpeg integration', null, ['status' => PostStatus::PROCESSING_VIDEO, 'type' => PostType::VIDEO]);
@@ -152,7 +155,7 @@ class TimelineDataIntegrityTest extends TestCase
             'size' => $originalSize, 'metadata' => ['provider' => 'r2_direct', 'upload_state' => 'uploaded',
                 'temp_disk' => 'r2_temp', 'temp_path' => $source, 'final_disk' => 'r2_final'],
         ]);
-        (new ConvertAndCompressPostVideo($post))->handle();
+        (new ConvertAndCompressPostVideo($post))->handle(app(R2DirectUploadService::class));
         $media->refresh();
         $this->assertSame(MediaStatus::PROCESSED, $media->status);
         $this->assertSame(PostStatus::ACTIVE, $post->refresh()->status);
@@ -161,12 +164,16 @@ class TimelineDataIntegrityTest extends TestCase
         $this->assertStringEndsWith('.webp', $media->thumbnail_path);
         $final = \Illuminate\Support\Facades\Storage::disk('r2_final');
         $final->assertExists([$media->source_path, $media->thumbnail_path]);
+        $originalStorage = data_get($media->metadata, 'original_storage');
+        $this->assertSame($originalSize, (int) ($originalStorage['size'] ?? 0));
+        $final->assertExists($originalStorage['path'] ?? '');
+        $this->assertSame($originalSha256, hash_file('sha256', $final->path($originalStorage['path'])));
         $disk->assertMissing($source);
         $this->assertLessThan($originalSize, $final->size($media->source_path));
         $this->assertSame($originalSize, data_get($media->metadata, 'original_size'));
         $this->assertSame($final->size($media->source_path), data_get($media->metadata, 'optimized_size'));
         $beforeRetry = $media->source_path;
-        (new ConvertAndCompressPostVideo($post))->handle();
+        (new ConvertAndCompressPostVideo($post))->handle(app(R2DirectUploadService::class));
         $this->assertSame($beforeRetry, $media->refresh()->source_path);
         if($large) fwrite(STDERR, sprintf("\nLocal large-video verification: original=%d bytes, optimized=%d bytes, temp_deleted=yes\n", $originalSize, $media->size));
     }
@@ -826,7 +833,7 @@ class TimelineDataIntegrityTest extends TestCase
         ]);
 
         try {
-            (new ConvertAndCompressPostVideo($post))->handle();
+            (new ConvertAndCompressPostVideo($post))->handle(app(R2DirectUploadService::class));
             $this->fail('A missing source must fail processing.');
         }
         catch (\Exception $e) {

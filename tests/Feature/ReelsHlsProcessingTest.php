@@ -29,6 +29,14 @@ class ReelsHlsProcessingTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_hls_rendition_ladder_reaches_source_matched_1080p_without_upscaling(): void
+    {
+        $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionHeightsForSource(720));
+        $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionHeightsForSource(1080));
+        $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionHeightsForSource(2160));
+        $this->assertSame([], GeneratePostVideoHls::renditionHeightsForSource(180));
+    }
+
     public function test_r2_hls_url_is_only_exposed_to_the_enabled_allowlist_and_internal_signature_is_hidden(): void
     {
         Storage::fake('r2_final');
@@ -108,8 +116,74 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame('ready', data_get($media->metadata, 'playback_state'));
         $this->assertSame('skipped', data_get($media->metadata, 'background_processing_state'));
         $this->assertSame('skipped', data_get($media->metadata, 'playback.hls_state'));
+        $this->assertSame(GeneratePostVideoHls::ENCODING_VERSION, data_get($media->metadata, 'playback.encoding_version'));
         $this->assertNull(data_get($media->metadata, 'playback.hls'));
         Storage::disk('r2_final')->assertExists('uploads/posts/source.mp4');
+    }
+
+    public function test_original_1080p_source_produces_an_adaptive_1080p_hls_rendition(): void
+    {
+        $binary = (new \Symfony\Component\Process\ExecutableFinder())->find('ffmpeg');
+        if (! $binary) {
+            $this->markTestSkipped('FFmpeg is required for the HLS encoding integration test.');
+        }
+
+        Event::fake();
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => true, 'media.cache.control' => 'public, max-age=31536000, immutable']);
+        $post = $this->createPost($this->user());
+        $media = $this->video($post, [
+            'provider' => 'r2',
+            'playback_state' => 'ready',
+            'background_processing_state' => 'queued',
+            'background_processing_dispatched_at' => now()->subMinute()->toIso8601String(),
+            'original_storage' => [
+                'disk' => 'r2_final',
+                'path' => 'uploads/posts/videos/originals/private/source.mp4',
+                'extension' => 'mp4',
+                'mime' => 'video/mp4',
+                'size' => 12,
+            ],
+        ]);
+
+        $resource = $this->resourceFor($media, $post->user);
+        $this->assertArrayNotHasKey('original_storage', $resource['metadata']);
+
+        $disk = Storage::disk('r2_final');
+        $sourcePath = 'fixtures/reel-1080.mp4';
+        $disk->makeDirectory(dirname($sourcePath));
+        $sourceAbsolutePath = $disk->path($sourcePath);
+        (new \Symfony\Component\Process\Process([
+            $binary, '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=24',
+            '-t', '1.5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an', $sourceAbsolutePath,
+        ]))->setTimeout(120)->mustRun();
+        $sourceBytes = file_get_contents($sourceAbsolutePath);
+        $sourceSize = strlen($sourceBytes);
+        $disk->put($media->source_path, $sourceBytes);
+        $originalPath = 'uploads/posts/videos/originals/'.$media->id.'/source.mp4';
+        $disk->put($originalPath, $sourceBytes);
+        $media->size = $sourceSize;
+        $media->metadata = array_merge($media->metadata, [
+            'original_storage' => [
+                'disk' => 'r2_final',
+                'path' => $originalPath,
+                'extension' => 'mp4',
+                'mime' => 'video/mp4',
+                'size' => $sourceSize,
+            ],
+        ]);
+        $media->save();
+
+        (new GeneratePostVideoHls((int) $media->id))->handle(app(VideoUploadService::class), app(ReelsHlsRollout::class));
+
+        $media->refresh();
+        $this->assertSame('ready', data_get($media->metadata, 'playback.hls_state'));
+        $this->assertContains(1080, array_column(data_get($media->metadata, 'playback.renditions', []), 'height'));
+        $signature = data_get($media->metadata, 'playback.hls_source_signature');
+        $masterPath = 'uploads/posts/videos/'.$media->id.'/hls/'.$signature.'/master.m3u8';
+        $disk->assertExists($masterPath);
+        $this->assertStringContainsString('RESOLUTION=1920x1080', $disk->get($masterPath));
+        $this->assertSame($sourceSize, $disk->size($originalPath));
     }
 
     public function test_terminal_encoding_failure_keeps_mp4_ready_and_records_a_retryable_background_failure(): void
@@ -166,6 +240,40 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame('ready', data_get($media->metadata, 'playback_state'));
         $this->assertSame('queued', data_get($media->metadata, 'background_processing_state'));
         Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $media->id);
+    }
+
+    public function test_rebuild_option_queues_old_hls_outputs_in_bounded_batches(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => true]);
+        $oldMedia = $this->video($this->createPost($this->user()), [
+            'provider' => 'r2',
+            'playback' => [
+                'hls' => 'https://cdn.example.test/old/master.m3u8',
+                'hls_state' => 'ready',
+                'renditions' => [['height' => 720, 'state' => 'ready']],
+            ],
+        ]);
+        $newMedia = $this->video($this->createPost($this->user()), [
+            'provider' => 'r2',
+            'background_processing_state' => 'processed',
+            'playback' => [
+                'hls_state' => 'ready',
+                'encoding_version' => GeneratePostVideoHls::ENCODING_VERSION,
+            ],
+        ]);
+
+        $this->artisan('media:reconcile-reel-hls', ['--rebuild' => true, '--limit' => 1])
+            ->expectsOutput('Requeued 1 reel HLS job(s).')
+            ->assertSuccessful();
+
+        $oldMedia->refresh();
+        $this->assertSame('queued', data_get($oldMedia->metadata, 'playback.hls_state'));
+        $this->assertSame('queued', data_get($oldMedia->metadata, 'background_processing_state'));
+        $this->assertSame('ready', data_get($newMedia->fresh()->metadata, 'playback.hls_state'));
+        Queue::assertPushedTimes(GeneratePostVideoHls::class, 1);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $oldMedia->id);
     }
 
     public function test_performance_playback_metrics_discard_identifying_fields(): void

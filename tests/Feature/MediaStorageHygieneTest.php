@@ -119,4 +119,53 @@ class MediaStorageHygieneTest extends TestCase
         $this->expectExceptionMessage('not configured');
         $service->publishUploadedVideo('sample');
     }
+
+    public function test_original_r2_object_can_be_copied_to_final_storage_without_deleting_the_source(): void
+    {
+        Storage::fake('r2_temp');
+        Storage::fake('r2_final');
+        config([
+            'media.cloudflare.r2.direct_upload_enabled' => true,
+            'media.cloudflare.r2.direct_upload_disk' => 'r2_temp',
+            'media.cloudflare.r2.final_disk' => 'r2_final',
+            'filesystems.disks.r2_temp' => [
+                'enabled' => true, 'bucket' => 'media-temp', 'endpoint' => 'https://r2.example.test',
+                'key' => 'test-key', 'secret' => 'test-secret',
+            ],
+            'filesystems.disks.r2_final' => [
+                'enabled' => true, 'bucket' => 'media-final', 'endpoint' => 'https://r2.example.test',
+                'key' => 'test-key', 'secret' => 'test-secret',
+            ],
+        ]);
+        $sourcePath = 'tmp/direct/videos/original.mp4';
+        Storage::disk('r2_temp')->put($sourcePath, 'video');
+
+        $client = \Mockery::mock(\Aws\S3\S3Client::class);
+        $client->shouldReceive('headObject')->twice()->andReturn(
+            new \Aws\Result(['ContentLength' => 5, 'ContentType' => 'video/mp4']),
+            new \Aws\Result(['ContentLength' => 5, 'ContentType' => 'video/mp4'])
+        );
+        $client->shouldReceive('copyObject')->once()->with(\Mockery::on(
+            fn (array $options): bool => $options['Bucket'] === 'media-final'
+                && str_starts_with($options['Key'], 'uploads/posts/videos/originals/42/')
+                && $options['ContentType'] === 'video/mp4'
+        ))->andReturn(new \Aws\Result());
+        $service = new class($client) extends R2DirectUploadService {
+            public function __construct(private \Aws\S3\S3Client $client) {}
+            protected function s3Client(string $disk): \Aws\S3\S3Client { return $this->client; }
+        };
+
+        $published = $service->publishUploadedObject(
+            $sourcePath,
+            'uploads/posts/videos/originals/42',
+            'mp4',
+            'video/mp4',
+            'r2_temp',
+            false
+        );
+
+        $this->assertSame('r2_final', $published['disk']);
+        $this->assertSame(5, $published['size']);
+        Storage::disk('r2_temp')->assertExists($sourcePath);
+    }
 }

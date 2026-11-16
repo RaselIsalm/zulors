@@ -23,6 +23,8 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
+    public const ENCODING_VERSION = 'v2';
+
     public int $tries = 5;
     public int $timeout = 21600;
     // Keep this shorter than the stale-job threshold so a recovered dispatch can acquire the unique lock.
@@ -33,7 +35,16 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         360 => ['video' => 650000, 'max' => 800000, 'bandwidth' => 900000],
         480 => ['video' => 1000000, 'max' => 1250000, 'bandwidth' => 1400000],
         720 => ['video' => 2100000, 'max' => 2500000, 'bandwidth' => 2700000],
+        1080 => ['video' => 4800000, 'max' => 5500000, 'bandwidth' => 6000000],
     ];
+
+    public static function renditionHeightsForSource(int $sourceHeight): array
+    {
+        return array_values(array_filter(
+            array_keys(self::LADDER),
+            static fn (int $height): bool => $height <= $sourceHeight
+        ));
+    }
 
     public function __construct(public readonly int $mediaId)
     {
@@ -63,6 +74,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
 
         $metadata = $media->metadata ?? [];
+        $source = $this->sourceDescriptor($media);
         $sourceSignature = $this->sourceSignature($media);
         $attempt = (int) data_get($metadata, 'background_processing_attempts', 0) + 1;
 
@@ -74,7 +86,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         $startedAt = microtime(true);
         $queueAgeSeconds = $this->queueAgeSeconds($metadata);
         $workDirectory = storage_path('app/tmp/reel-hls/'.$media->id.'-'.bin2hex(random_bytes(5)));
-        $sourcePath = $workDirectory.'/source.'.($this->safeExtension($media->extension) ?: 'mp4');
+        $sourcePath = $workDirectory.'/source.'.($this->safeExtension($source['extension']) ?: 'mp4');
         @mkdir($workDirectory, 0775, true);
 
         try {
@@ -98,14 +110,14 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 'queue_age_seconds' => $queueAgeSeconds,
             ]);
 
-            $this->downloadSource($media, $sourcePath);
+            $this->downloadSource($source, $sourcePath);
             $dimensions = $videoUploadService->getVideoDimensions($sourcePath);
             $sourceHeight = (int) ($dimensions['height'] ?? 0);
             $sourceWidth = (int) ($dimensions['width'] ?? 0);
-            $targets = array_filter(array_keys(self::LADDER), static fn (int $height): bool => $height <= $sourceHeight);
+            $targets = self::renditionHeightsForSource($sourceHeight);
 
             if (! $targets || $sourceHeight < 240 || $sourceWidth < 2) {
-                $this->markSkipped($media, $sourceSignature);
+                $this->markSkipped($media, $sourceSignature, $dimensions);
 
                 return;
             }
@@ -157,7 +169,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             file_put_contents($masterPath, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n".implode("\n", $playlistEntries)."\n");
             $this->putFile($outputDisk, $outputPrefix.'/master.m3u8', $masterPath, 'application/vnd.apple.mpegurl');
 
-            $this->updateMetadata($media, function (array $next) use ($diskName, $outputPrefix, $renditions, $sourceSignature): array {
+            $this->updateMetadata($media, function (array $next) use ($diskName, $outputPrefix, $renditions, $sourceSignature, $dimensions): array {
                 $next['playback_state'] = 'ready';
                 $next['background_processing_state'] = 'processed';
                 $next['background_processing_progress'] = 100;
@@ -167,6 +179,11 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                     'hls' => storage_url($outputPrefix.'/master.m3u8', $diskName),
                     'hls_state' => 'ready',
                     'hls_source_signature' => $sourceSignature,
+                    'encoding_version' => self::ENCODING_VERSION,
+                    'source_dimensions' => [
+                        'width' => (int) ($dimensions['width'] ?? 0),
+                        'height' => (int) ($dimensions['height'] ?? 0),
+                    ],
                     'renditions' => $renditions,
                 ]);
 
@@ -252,9 +269,22 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function downloadSource(Media $media, string $destination): void
+    private function sourceDescriptor(Media $media): array
     {
-        $stream = Storage::disk($media->disk)->readStream($media->source_path);
+        $original = (array) data_get($media->metadata, 'original_storage', []);
+
+        return [
+            'disk' => (string) ($original['disk'] ?? $media->disk),
+            'path' => (string) ($original['path'] ?? $media->source_path),
+            'size' => (int) ($original['size'] ?? $media->size),
+            'mime' => (string) ($original['mime'] ?? $media->mime),
+            'extension' => (string) ($original['extension'] ?? $media->extension),
+        ];
+    }
+
+    private function downloadSource(array $source, string $destination): void
+    {
+        $stream = Storage::disk($source['disk'])->readStream($source['path']);
 
         if (! is_resource($stream)) {
             throw new RuntimeException('Unable to read the playback-ready video source.');
@@ -328,12 +358,15 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 
     private function sourceSignature(Media $media): string
     {
+        $source = $this->sourceDescriptor($media);
+
         return substr(hash('sha256', implode('|', [
-            (string) $media->disk,
-            (string) $media->source_path,
-            (string) $media->size,
-            (string) $media->mime,
-            (string) $media->extension,
+            self::ENCODING_VERSION,
+            $source['disk'],
+            $source['path'],
+            (string) $source['size'],
+            $source['mime'],
+            $source['extension'],
         ])), 0, 24);
     }
 
@@ -369,9 +402,9 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function markSkipped(Media $media, string $sourceSignature): void
+    private function markSkipped(Media $media, string $sourceSignature, array $dimensions = []): void
     {
-        $this->updateMetadata($media, static function (array $metadata) use ($sourceSignature): array {
+        $this->updateMetadata($media, static function (array $metadata) use ($sourceSignature, $dimensions): array {
             $metadata['playback_state'] = 'ready';
             $metadata['background_processing_state'] = 'skipped';
             $metadata['background_processing_progress'] = 100;
@@ -380,6 +413,11 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 'hls' => null,
                 'hls_state' => 'skipped',
                 'hls_source_signature' => $sourceSignature,
+                'encoding_version' => self::ENCODING_VERSION,
+                'source_dimensions' => [
+                    'width' => (int) ($dimensions['width'] ?? 0),
+                    'height' => (int) ($dimensions['height'] ?? 0),
+                ],
                 'renditions' => [],
             ]);
 

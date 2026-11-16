@@ -42,7 +42,7 @@ class FakeR2DirectUploadService extends R2DirectUploadService
         return ['disk' => $published['disk'], 'video_path' => $published['path'], 'video_size' => $published['size']];
     }
 
-    public function publishUploadedObject(string $tempPath, string $targetPrefix, string $extension, string $contentType, ?string $sourceDisk = null): array
+    public function publishUploadedObject(string $tempPath, string $targetPrefix, string $extension, string $contentType, ?string $sourceDisk = null, bool $deleteSource = true): array
     {
         $sourceDisk = $sourceDisk ?: 'r2_temp';
         $targetDisk = 'r2_final';
@@ -53,7 +53,9 @@ class FakeR2DirectUploadService extends R2DirectUploadService
             $target->put($path, $source->get($tempPath));
         }
         $size = (int) $target->size($path);
-        $source->delete($tempPath);
+        if($deleteSource) {
+            $source->delete($tempPath);
+        }
         return ['disk' => $targetDisk, 'path' => $path, 'size' => $size];
     }
 }

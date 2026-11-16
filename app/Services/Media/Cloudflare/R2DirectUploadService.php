@@ -132,9 +132,10 @@ class R2DirectUploadService
         string $targetPrefix,
         string $extension,
         string $contentType,
-        ?string $sourceDisk = null
+        ?string $sourceDisk = null,
+        bool $deleteSource = true
     ): array {
-        if(! $this->isConfigured()) {
+        if(! $this->storageIsConfigured() || ($deleteSource && ! $this->isConfigured())) {
             throw new Exception('Cloudflare R2 direct upload is not configured.');
         }
 
@@ -243,13 +244,16 @@ class R2DirectUploadService
             throw new Exception('R2 final object metadata does not match the uploaded source.');
         }
 
-        $sourceStorage->delete($tempPath);
+        if($deleteSource) {
+            $sourceStorage->delete($tempPath);
+        }
 
         Log::info('media.r2_object_promoted', [
             'source_disk' => $sourceDisk,
             'target_disk' => $targetDisk,
             'size_bytes' => $publishedSize,
             'vps_media_body_bytes' => 0,
+            'source_retained' => ! $deleteSource,
         ]);
 
         return ['disk' => $targetDisk, 'path' => $targetPath, 'size' => $publishedSize];

@@ -94,6 +94,7 @@
 	import Hls from 'hls.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { buildAdaptiveVideoSource, canVideoElementPlayNatively, getDirectPlaybackFallback } from '@/kernel/services/media/adaptive-video/index.js';
+	import { applyReelPreloadPolicy, getReelPreloadPolicy } from '@/kernel/services/media/reel-preload-policy.js';
 	import { buildReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 	import { getNetworkProfileSnapshot, isSlowNetworkProfile, subscribeNetworkProfile } from '@/kernel/services/network/index.js';
 	import { createReelPlaybackGestureController } from '@/kernel/services/media/reel-playback-gestures.js';
@@ -212,8 +213,14 @@
 				return props.active || props.isNear;
 			});
 
+			const preloadPolicy = computed(() => getReelPreloadPolicy({
+				active: props.active,
+				isNext: props.isNext,
+				networkProfile: state.networkProfile
+			}));
+
 			const shouldWarmPlayback = computed(() => {
-				return ! props.blocked && (props.active || (props.isNext && ! state.networkProfile.offline));
+				return ! props.blocked && preloadPolicy.value.shouldWarm;
 			});
 
 			const shouldAttachPlaybackSource = computed(() => {
@@ -982,16 +989,22 @@
 						capLevelToPlayerSize: true,
 						lowLatencyMode: false,
 						backBufferLength: state.networkProfile.reelsBackBufferLength,
-						startLevel: isSlowNetworkProfile(state.networkProfile) ? 0 : -1,
-						maxBufferLength: state.networkProfile.reelsMaxBufferLength,
-						maxMaxBufferLength: state.networkProfile.reelsMaxMaxBufferLength
+						startLevel: preloadPolicy.value.startLevel,
+						maxBufferLength: preloadPolicy.value.maxBufferLength,
+						maxMaxBufferLength: preloadPolicy.value.maxMaxBufferLength
 					});
+					applyReelPreloadPolicy(hlsInstance, preloadPolicy.value);
 
 					hlsInstance.on(Hls.Events.ERROR, handleHlsError);
 					hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
 						handleLoadedMetadata();
 					});
-					hlsInstance.on(Hls.Events.FRAG_BUFFERED, syncBuffered);
+					hlsInstance.on(Hls.Events.FRAG_BUFFERED, () => {
+						syncBuffered();
+						if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 3.5) {
+							hlsInstance?.stopLoad();
+						}
+					});
 					hlsInstance.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
 						syncBuffered();
 						const height = hlsInstance?.levels?.[data?.level]?.height || 0;
@@ -1040,6 +1053,10 @@
 			const syncPlaybackWindow = () => {
 				if(hlsInstance) {
 					try {
+						applyReelPreloadPolicy(hlsInstance, preloadPolicy.value);
+						if(props.active && preloadPolicy.value.autoLevelCapping < 0) {
+							hlsInstance.nextLevel = -1;
+						}
 						if(shouldWarmPlayback.value) {
 							hlsInstance.startLoad(hlsStartPosition());
 						}
