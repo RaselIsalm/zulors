@@ -7,6 +7,7 @@ import {
 } from '@/kernel/services/cache/feed-cache.js';
 import { useAuthStore } from '@M/store/auth/auth.store.js';
 import { useTimelineStore } from '@M/store/timeline/timeline.store.js';
+import { shouldRetryAuthenticatedBootstrap } from '@/kernel/services/authenticated-bootstrap/index.js';
 
 const bootstrapCacheKey = 'colibri.mobile.bootstrap.v1';
 const bootstrapCacheTtl = 1000 * 60 * 15;
@@ -102,7 +103,11 @@ const useAppStore = defineStore('mobile_app_store', {
         bootstrapApplication: async function() {
             const authStore = useAuthStore();
             const loginUrl = embedder('routes.user_auth_index');
-            const retryDelays = [0, 800, 1600];
+            const retryDelays = [0, 350, 900];
+            const serverAuthenticated = Boolean(
+                window.__zulorsBoot?.serverAuthenticated
+                || window.__zulorsBoot?.serverAuthUserId
+            );
 
             for (const [attemptIndex, retryDelay] of retryDelays.entries()) {
                 if (retryDelay) {
@@ -122,6 +127,15 @@ const useAppStore = defineStore('mobile_app_store', {
                                 status: response?.status ?? 500
                             }
                         });
+                    }
+
+                    if(shouldRetryAuthenticatedBootstrap({
+                        serverAuthenticated: serverAuthenticated,
+                        bootstrapData: bootstrapData,
+                        attemptIndex: attemptIndex,
+                        attemptCount: retryDelays.length
+                    })) {
+                        continue;
                     }
 
                     this.lastBootstrapMeta = {
@@ -145,6 +159,10 @@ const useAppStore = defineStore('mobile_app_store', {
                         error?.name === 'ChunkLoadError';
 
                     if (isSessionError) {
+                        if(serverAuthenticated && [401, 419].includes(statusCode) && attemptIndex < retryDelays.length - 1) {
+                            continue;
+                        }
+
                         const cachedUserId = authStore.userData?.id ?? this.appData?.auth?.user?.id ?? window.__zulorsBoot?.authUserId ?? null;
 
                         if(cachedUserId) {

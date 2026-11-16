@@ -58,6 +58,11 @@
         bootState.variant = variant;
         bootState.isAuthenticated = Boolean(isAuthenticated);
         bootState.authUserId = authUserId;
+        // Keep the authentication state from the protected HTML request separate
+        // from the API bootstrap result. A just-created session can briefly be
+        // visible to the page request before the WebView sends its cookie on XHR.
+        bootState.serverAuthenticated = Boolean(isAuthenticated);
+        bootState.serverAuthUserId = authUserId;
         bootState.cacheKey = cacheKey;
         bootState.cacheTtl = cacheTtl;
         bootState.cacheMaxAge = cacheMaxAge;

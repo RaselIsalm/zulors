@@ -1,6 +1,6 @@
 <template>
     <div class="story-media-stage">
-        <StoryMediaLoader v-show="isLoading" class="absolute inset-0 z-20" v-bind:lqipBase64="frameData.media.lqip_base64"></StoryMediaLoader>
+        <StoryMediaLoader v-show="isLoading || hasError" class="absolute inset-0 z-20" v-bind:lqipBase64="previewUrl" v-bind:showSpinner="isLoading && !hasError"></StoryMediaLoader>
         <img
             v-if="showBlurBackdrop"
             v-bind:src="frameData.media.source_url"
@@ -10,13 +10,14 @@
         >
         <div v-if="showBlurBackdrop" class="story-media-backdrop-shade"></div>
         <img
-            v-show="! isLoading"
+            v-show="! isLoading && !hasError"
             v-bind:style="foregroundStyle"
             v-bind:class="foregroundFitClass"
             class="story-media-foreground"
-            v-bind:src="frameData.media.source_url"
+            v-bind:src="mediaItem.source_url"
             v-on:load="onLoaded"
-            alt="Image"
+            v-on:error="onError"
+            alt=""
         >
     </div>
 </template>
@@ -36,6 +37,7 @@
         },
         setup: function(props, context) {
             const isLoading = ref(true);
+            const hasError = ref(false);
             const loadedDimensions = ref({});
             const mediaItem = computed(() => {
                 return props.frameData.media || {};
@@ -47,6 +49,8 @@
 
             return {
                 isLoading: isLoading,
+                hasError: hasError,
+                previewUrl: computed(() => mediaItem.value.lqip_base64 || mediaItem.value.thumbnail_url || ''),
                 foregroundFitClass: computed(() => {
                     return storyMediaObjectFitClass(mediaItem.value, loadedDimensions.value);
                 }),
@@ -56,8 +60,12 @@
                 foregroundStyle: foregroundStyle,
                 onLoaded: (event) => {
                     loadedDimensions.value = elementImageDimensions(event.target);
+                    hasError.value = false;
                     isLoading.value = false;
                     colibriEventBus.emit('story:play');
+                },
+                onError: () => {
+                    hasError.value = true;
                 }
             };
         },

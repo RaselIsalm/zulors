@@ -67,6 +67,7 @@
                             <PublicationVideo
                                 v-bind:postMedia="postMedia"
                                 v-bind:sponsoredFeed="Boolean(sponsoredAdData)"
+                                v-bind:isPriority="position === 1"
                             v-bind:openReelsOnTap="true"
                                 v-on:open-reels="openReelsViewer"
                             v-bind:key="postData.id"></PublicationVideo>

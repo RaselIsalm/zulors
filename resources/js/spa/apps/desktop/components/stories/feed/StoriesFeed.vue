@@ -5,7 +5,7 @@
                 <div v-on:click="createStory" class="w-[74px] cursor-pointer">
                     <div class="size-[74px] relative p-1">
                         <div class="size-full rounded-full overflow-hidden">
-                            <img class="size-full inline-block bg-fill-pr" v-bind:src="userData.avatar_url" alt="Image">
+                            <img class="size-full inline-block bg-fill-pr" v-bind:src="userData.avatar_url || $embedder('config.user.default_avatar')" v-on:error="replaceWithDefaultAvatar" alt="" aria-hidden="true" loading="eager" decoding="async" fetchpriority="high">
                         </div>
                         <div class="border-3 border-bg-pr rounded-full inline-flex-center text-bg-pr size-icon-normal bg-lab-pr2 absolute bottom-0.5 right-0.5 z-10">
                             <SvgIcon name="plus"></SvgIcon>
@@ -21,10 +21,10 @@
                     <RouterLink v-if="storyCanOpen(storyData)" v-bind:to="{ name: 'stories_index', params: { story_uuid: storyData.story_uuid } }">
                         <div class="size-[74px] rounded-full border-2 p-[3px] relative" v-bind:class="storyBorderClasses(storyData)">
                             <div v-if="! storyData.is_seen && ! storyData.is_owner && ! isStoryProcessing(storyData)" class="absolute inset-0">
-                                <img v-bind:src="$asset('assets/avatars/story-avatar-ring.png')" alt="Image">
+                                <img v-bind:src="$asset('assets/avatars/story-avatar-ring.png')" alt="" aria-hidden="true" loading="eager" decoding="async">
                             </div>
                             <div class="rounded-full size-full overflow-hidden">
-                                <img class="size-full inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url" alt="Image">
+                                <img class="size-full inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url || $embedder('config.user.default_avatar')" v-on:error="replaceWithDefaultAvatar" alt="" aria-hidden="true" loading="eager" decoding="async">
                             </div>
                             <div v-if="isStoryProcessing(storyData)" class="absolute inset-[3px] rounded-full bg-black/60 inline-flex-center flex-col">
                                 <span class="text-white text-cap-l font-semibold leading-none">{{ storyProgressText(storyData) }}</span>
@@ -41,7 +41,7 @@
                     <div v-else class="block cursor-wait" role="status" aria-live="polite">
                         <div class="size-[74px] rounded-full border-2 p-[3px] relative" v-bind:class="storyBorderClasses(storyData)">
                             <div class="rounded-full size-full overflow-hidden">
-                                <img class="size-full inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url" alt="Image">
+                                <img class="size-full inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url || $embedder('config.user.default_avatar')" v-on:error="replaceWithDefaultAvatar" alt="" aria-hidden="true" loading="eager" decoding="async">
                             </div>
                             <div class="absolute inset-[3px] rounded-full bg-black/60 inline-flex-center flex-col">
                                 <span class="text-white text-cap-l font-semibold leading-none">{{ storyProgressText(storyData) }}</span>
@@ -169,6 +169,14 @@
             return {
                 storiesFeed: storiesFeed,
                 userData: userData,
+                replaceWithDefaultAvatar: (event) => {
+                    const image = event?.target;
+                    const defaultAvatar = embedder('config.user.default_avatar');
+
+                    if(image && defaultAvatar && image.src !== new URL(defaultAvatar, window.location.href).href) {
+                        image.src = defaultAvatar;
+                    }
+                },
                 isStoryProcessing: isStoryProcessing,
                 storyProgress: storyProgress,
                 storyProgressText: (storyData) => {

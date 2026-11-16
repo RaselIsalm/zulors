@@ -10,13 +10,13 @@
 			ref="mediaViewportRef"
 			v-bind:style="mediaFrameStyle"
 		class="relative w-full overflow-hidden bg-black">
-			<img v-if="mediaItem.thumbnail_url" v-bind:src="mediaItem.thumbnail_url" alt="" aria-hidden="true" loading="lazy" decoding="async" class="pointer-events-none absolute inset-0 size-full object-cover">
+			<img v-if="posterUrl" v-bind:src="posterUrl" alt="" aria-hidden="true" v-bind:loading="isPriority ? 'eager' : 'lazy'" v-bind:fetchpriority="isPriority ? 'high' : 'auto'" decoding="async" class="pointer-events-none absolute inset-0 size-full object-cover">
 			<VideoPlayer
 				v-if="isNearViewport"
 				v-bind:postId="mediaItem.mediaable_id"
 				v-bind:mediaId="mediaItem.id"
 				v-bind:mediaItem="mediaItem"
-				v-bind:thumbnailUrl="mediaItem.thumbnail_url"
+				v-bind:thumbnailUrl="posterUrl"
 				v-bind:duration="mediaItem.metadata.duration"
 				v-bind:isPortrait="isPortrait"
 				v-bind:metadata="mediaItem.metadata"
@@ -47,6 +47,7 @@
                 default: {}
             },
 			sponsoredFeed: { type: Boolean, default: false },
+			isPriority: { type: Boolean, default: false },
 			openReelsOnTap: {
 				type: Boolean,
 				default: false
@@ -59,6 +60,7 @@
 			const mediaItem = computed(() => {
 				return props.postMedia[0] || {};
 			});
+			const posterUrl = computed(() => mediaItem.value.thumbnail_url || mediaItem.value.lqip_base64 || '');
 			const canPlayImmediately = computed(() => {
 				const item = mediaItem.value;
 
@@ -128,6 +130,7 @@
 
 			return {
 				mediaItem: mediaItem,
+				posterUrl: posterUrl,
 				mediaViewportRef: mediaViewportRef,
 				isNearViewport: isNearViewport,
 				canPlayImmediately: canPlayImmediately,

@@ -1,6 +1,6 @@
 <template>
     <div class="story-media-stage">
-        <StoryMediaLoader v-show="isLoading" class="absolute inset-0 z-20" v-bind:lqipBase64="frameData.media.lqip_base64"></StoryMediaLoader>
+        <StoryMediaLoader v-show="isLoading || hasError" class="absolute inset-0 z-20" v-bind:lqipBase64="previewUrl" v-bind:showSpinner="isLoading && !hasError"></StoryMediaLoader>
         <video
             v-if="showBlurBackdrop && mediaSourceUrl"
             ref="storyBackdropVideo"
@@ -15,12 +15,14 @@
         ></video>
         <div v-if="showBlurBackdrop" class="story-media-backdrop-shade"></div>
         <video
-            v-show="! isLoading"
+            v-show="! isLoading && !hasError"
             ref="storyVideo"
             v-bind:src="mediaSourceUrl"
+            v-bind:poster="previewUrl"
             v-bind:class="foregroundFitClass"
             v-on:loadedmetadata="handleLoadedMetadata"
             v-on:loadeddata="onLoaded"
+            v-on:error="onMediaError"
             v-on:play="syncBackdropVideo"
             v-on:pause="syncBackdropVideo"
             v-on:timeupdate="syncBackdropVideo"
@@ -51,6 +53,7 @@
             const storyVideo = ref(null);
             const storyBackdropVideo = ref(null);
             const isLoading = ref(true);
+            const hasError = ref(false);
             const frameData = ref(props.frameData);
             const playerState = inject('playerState');
             const loadedDimensions = ref({});
@@ -60,6 +63,7 @@
             const mediaSourceUrl = computed(() => {
                 return mediaItem.value.source_url || mediaItem.value.preview_url || '';
             });
+            const previewUrl = computed(() => mediaItem.value.lqip_base64 || mediaItem.value.thumbnail_url || '');
             
             onMounted(() => {
                 if (hasAttachedMusic() || localStorage.getItem('stories_videos_muted')) {
@@ -147,6 +151,8 @@
                 storyVideo: storyVideo,
                 storyBackdropVideo: storyBackdropVideo,
                 mediaSourceUrl: mediaSourceUrl,
+                previewUrl: previewUrl,
+                hasError: hasError,
                 foregroundFitClass: computed(() => {
                     return storyMediaObjectFitClass(mediaItem.value, loadedDimensions.value);
                 }),
@@ -159,10 +165,14 @@
                 },
                 syncBackdropVideo: syncBackdropVideo,
                 onLoaded: () => {
+                    hasError.value = false;
                     playVideo(storyVideo.value);
                     isLoading.value = false;
                     syncBackdropVideo();
                     colibriEventBus.emit('story:play');
+                },
+                onMediaError: () => {
+                    hasError.value = true;
                 }
             }
         },

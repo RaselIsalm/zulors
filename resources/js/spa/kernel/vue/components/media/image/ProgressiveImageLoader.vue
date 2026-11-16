@@ -1,15 +1,17 @@
 <template>
     <div class="relative block size-full min-h-20 bg-bg-pr overflow-hidden">
         <img
-            v-if="base64Image && ! isLoaded"
+            v-if="base64Image && (! isLoaded || hasError)"
             v-bind:src="base64Image"
             v-bind="$attrs"
             class="absolute inset-0 size-full object-cover"
         alt="Image">
+        <div v-if="hasError && ! base64Image" class="absolute inset-0 bg-bg-pr" aria-hidden="true"></div>
         <div v-show="isSensitive" class="absolute inset-0">
             <SensitiveContentAlert></SensitiveContentAlert>
         </div>
         <img
+            v-if="! hasError"
             ref="imageRef"
             v-bind:src="src"
             v-bind="$attrs"
@@ -54,14 +56,18 @@
         },
         setup: function(props, context) {
             const isLoaded = ref(false);
+            const hasError = ref(false);
             const imageRef = ref(null);
 
             onMounted(() => {
                 if(imageRef.value?.complete) {
-                    isLoaded.value = true;
-
                     if(imageRef.value.naturalWidth && imageRef.value.naturalHeight) {
+                        isLoaded.value = true;
                         context.emit('load', { target: imageRef.value });
+                    }
+                    else {
+                        hasError.value = true;
+                        context.emit('error', { target: imageRef.value });
                     }
 
                     return;
@@ -73,7 +79,7 @@
                 }
 
                 imageRef.value.onerror = (event) => {
-                    isLoaded.value = true;
+                    hasError.value = true;
                     context.emit('error', event);
                 }
             });
@@ -87,6 +93,7 @@
 
             return {
                 isLoaded: isLoaded,
+                hasError: hasError,
                 imageRef: imageRef
             };
         },

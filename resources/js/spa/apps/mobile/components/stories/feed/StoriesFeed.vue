@@ -8,7 +8,7 @@
                             <SvgIcon name="plus" classes="text-bg-pr size-4"></SvgIcon>
                         </div>
                         <div class="rounded-full overflow-hidden">
-                            <img class="size-full" v-bind:src="userData.avatar_url" alt="Avatar">
+                            <img class="size-full" v-bind:src="userData.avatar_url || $embedder('config.user.default_avatar')" v-on:error="replaceWithDefaultAvatar" alt="" aria-hidden="true" loading="eager" decoding="async" fetchpriority="high">
                         </div>
                     </div>
                     <div class="text-par-s text-lab-pr text-center whitespace-nowrap overflow-hidden text-ellipsis">
@@ -23,10 +23,10 @@
                         <div class="shrink-0 w-[80px]">
                             <div class="size-[80px] rounded-full border-2 p-[3px] relative" v-bind:class="storyBorderClasses(storyData)">
                                 <div v-if="! storyData.is_seen && ! storyData.is_owner && ! isStoryProcessing(storyData)" class="absolute inset-0">
-                                    <img v-bind:src="$asset('assets/avatars/story-avatar-ring.png')" alt="Image">
+                                    <img v-bind:src="$asset('assets/avatars/story-avatar-ring.png')" alt="" aria-hidden="true" loading="eager" decoding="async">
                                 </div>
                                 <div class="size-full rounded-full overflow-hidden">
-                                    <img class="size-full object-cover inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url" alt="Image">
+                                    <img class="size-full object-cover inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url || $embedder('config.user.default_avatar')" v-on:error="replaceWithDefaultAvatar" alt="" aria-hidden="true" loading="eager" decoding="async">
                                 </div>
                                 <div v-if="isStoryProcessing(storyData)" class="absolute inset-[3px] rounded-full bg-black/60 inline-flex-center flex-col">
                                     <span class="text-white text-cap-l font-semibold leading-none">{{ storyProgressText(storyData) }}</span>
@@ -45,7 +45,7 @@
                         <div class="shrink-0 w-[80px]">
                             <div class="size-[80px] rounded-full border-2 p-[3px] relative" v-bind:class="storyBorderClasses(storyData)">
                                 <div class="size-full rounded-full overflow-hidden">
-                                    <img class="size-full object-cover inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url" alt="Image">
+                                    <img class="size-full object-cover inline-block bg-fill-pr" v-bind:src="storyData.relations.user.avatar_url || $embedder('config.user.default_avatar')" v-on:error="replaceWithDefaultAvatar" alt="" aria-hidden="true" loading="eager" decoding="async">
                                 </div>
                                 <div class="absolute inset-[3px] rounded-full bg-black/60 inline-flex-center flex-col">
                                     <span class="text-white text-cap-l font-semibold leading-none">{{ storyProgressText(storyData) }}</span>
@@ -173,6 +173,14 @@
             return {
                 storiesFeed: storiesFeed,
                 userData: userData,
+                replaceWithDefaultAvatar: (event) => {
+                    const image = event?.target;
+                    const defaultAvatar = embedder('config.user.default_avatar');
+
+                    if(image && defaultAvatar && image.src !== new URL(defaultAvatar, window.location.href).href) {
+                        image.src = defaultAvatar;
+                    }
+                },
                 isStoryProcessing: isStoryProcessing,
                 storyProgress: storyProgress,
                 storyProgressText: (storyData) => {
