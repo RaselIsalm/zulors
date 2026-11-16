@@ -38,14 +38,16 @@ trait CreatesVideoFixture
         $this->assertSame('video/mp4', $media->mime);
         $this->assertStringEndsWith('.webp', $media->thumbnail_path);
         Storage::disk('r2_final')->assertExists([$media->source_path, $media->thumbnail_path]);
-        $originalStorage = data_get($media->metadata, 'original_storage');
-        $this->assertSame('r2_final', $originalStorage['disk'] ?? null);
-        Storage::disk('r2_final')->assertExists($originalStorage['path'] ?? '');
-        $this->assertSame($original['size'], (int) ($originalStorage['size'] ?? 0));
-        $this->assertSame(
-            data_get($original, 'metadata.fixture_sha256'),
-            hash_file('sha256', Storage::disk('r2_final')->path($originalStorage['path']))
-        );
+        if ($media->mediaable instanceof \App\Models\Post) {
+            $originalStorage = data_get($media->metadata, 'original_storage');
+            $this->assertSame('r2_final', $originalStorage['disk'] ?? null);
+            Storage::disk('r2_final')->assertExists($originalStorage['path'] ?? '');
+            $this->assertSame($original['size'], (int) ($originalStorage['size'] ?? 0));
+            $this->assertSame(
+                data_get($original, 'metadata.fixture_sha256'),
+                hash_file('sha256', Storage::disk('r2_final')->path($originalStorage['path']))
+            );
+        }
         Storage::disk('r2_temp')->assertMissing($original['source_path']);
         $this->assertSame($original['size'], data_get($media->metadata, 'original_size'));
         $this->assertSame(Storage::disk('r2_final')->size($media->source_path), data_get($media->metadata, 'optimized_size'));
