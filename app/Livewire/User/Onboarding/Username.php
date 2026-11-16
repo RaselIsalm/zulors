@@ -8,6 +8,7 @@ use App\Livewire\User\Onboarding\Base\OnboardingBase;
 use App\Models\Onboard;
 use App\Models\User;
 use App\Services\Relations\FollowService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -74,9 +75,16 @@ class Username extends OnboardingBase
 
         $this->makeFollowList();
 
+        // The final onboarding request must leave the newly activated account
+        // authenticated before Livewire sends the browser to the home route.
+        Auth::guard('web')->login($user, true);
+        if(request()->hasSession()) {
+            request()->session()->regenerate();
+        }
+
         event(new UserSignupCompletedEvent($user));
 
-        $this->redirect($this->getNextStepRoute($this->stepIndex));
+        $this->redirect(route('user.desktop.index'));
     }
 
     private function makeFollowList()

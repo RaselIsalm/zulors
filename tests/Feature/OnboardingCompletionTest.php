@@ -42,6 +42,9 @@ class OnboardingCompletionTest extends TestCase
             ->call('submitForm')
             ->assertRedirect(route('user.desktop.index'));
 
+        $this->get(route('user.desktop.index'))->assertOk();
+        $this->assertAuthenticatedAs($user);
+
         $user->refresh();
 
         $this->assertSame(UserStatus::ACTIVE, $user->status);
