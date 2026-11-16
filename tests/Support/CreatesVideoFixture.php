@@ -24,9 +24,9 @@ trait CreatesVideoFixture
             'source_path' => $path, 'type' => \App\Enums\Media\MediaType::VIDEO,
             'status' => \App\Enums\Media\MediaStatus::PROCESSING, 'disk' => 'r2_temp', 'thumbnail_disk' => 'r2_final',
             'extension' => 'avi', 'mime' => 'video/x-msvideo', 'size' => $disk->size($path),
-            'sha256' => hash_file('sha256', $disk->path($path)),
             'metadata' => ['provider' => 'r2_direct', 'upload_state' => 'uploaded', 'temp_disk' => 'r2_temp',
-                'temp_path' => $path, 'final_disk' => 'r2_final'],
+                'temp_path' => $path, 'final_disk' => 'r2_final',
+                'fixture_sha256' => hash_file('sha256', $disk->path($path))],
         ];
     }
 
@@ -42,7 +42,10 @@ trait CreatesVideoFixture
         $this->assertSame('r2_final', $originalStorage['disk'] ?? null);
         Storage::disk('r2_final')->assertExists($originalStorage['path'] ?? '');
         $this->assertSame($original['size'], (int) ($originalStorage['size'] ?? 0));
-        $this->assertSame($original['sha256'], hash_file('sha256', Storage::disk('r2_final')->path($originalStorage['path'])));
+        $this->assertSame(
+            data_get($original, 'metadata.fixture_sha256'),
+            hash_file('sha256', Storage::disk('r2_final')->path($originalStorage['path']))
+        );
         Storage::disk('r2_temp')->assertMissing($original['source_path']);
         $this->assertSame($original['size'], data_get($media->metadata, 'original_size'));
         $this->assertSame(Storage::disk('r2_final')->size($media->source_path), data_get($media->metadata, 'optimized_size'));

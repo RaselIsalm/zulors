@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-REPOSITORY="sbayshop3171-ship-it/zulors"
+REPOSITORY="RaselIsalm/zulors"
 CURRENT_BRANCH="$(git branch --show-current)"
 
 if [ "$CURRENT_BRANCH" != "main" ]; then
