@@ -4,6 +4,10 @@ const bootstrapHasAuthenticatedUser = (bootstrapData) => {
         && bootstrapData?.auth?.user?.id !== null;
 };
 
+const isExpiredSessionStatus = (statusCode) => {
+    return [401, 419].includes(Number(statusCode));
+};
+
 const shouldRetryAuthenticatedBootstrap = ({
     serverAuthenticated = false,
     bootstrapData = null,
@@ -17,5 +21,6 @@ const shouldRetryAuthenticatedBootstrap = ({
 
 export {
     bootstrapHasAuthenticatedUser,
+    isExpiredSessionStatus,
     shouldRetryAuthenticatedBootstrap
 };

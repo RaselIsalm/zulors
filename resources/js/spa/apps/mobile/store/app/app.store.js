@@ -7,7 +7,10 @@ import {
 } from '@/kernel/services/cache/feed-cache.js';
 import { useAuthStore } from '@M/store/auth/auth.store.js';
 import { useTimelineStore } from '@M/store/timeline/timeline.store.js';
-import { shouldRetryAuthenticatedBootstrap } from '@/kernel/services/authenticated-bootstrap/index.js';
+import {
+    isExpiredSessionStatus,
+    shouldRetryAuthenticatedBootstrap
+} from '@/kernel/services/authenticated-bootstrap/index.js';
 
 const bootstrapCacheKey = 'colibri.mobile.bootstrap.v1';
 const bootstrapCacheTtl = 1000 * 60 * 15;
@@ -150,7 +153,7 @@ const useAppStore = defineStore('mobile_app_store', {
                 } catch (error) {
                     const statusCode = error?.response?.status ?? null;
                     const errorMessage = String(error?.message ?? '').toLowerCase();
-                    const isSessionError = [401, 403, 419].includes(statusCode);
+                    const isSessionError = isExpiredSessionStatus(statusCode);
                     const isTemporaryServerError = [408, 429, 500, 502, 503, 504].includes(statusCode);
                     const isRecoverableLoadError =
                         errorMessage.includes('load failed') ||
@@ -159,7 +162,7 @@ const useAppStore = defineStore('mobile_app_store', {
                         error?.name === 'ChunkLoadError';
 
                     if (isSessionError) {
-                        if(serverAuthenticated && [401, 419].includes(statusCode) && attemptIndex < retryDelays.length - 1) {
+                        if(serverAuthenticated && isSessionError && attemptIndex < retryDelays.length - 1) {
                             continue;
                         }
 
