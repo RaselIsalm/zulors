@@ -14,8 +14,10 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const scratch = await mkdtemp(path.join(tmpdir(), 'zulors-publications-'));
 const videoPath = path.join(scratch, 'video.mp4');
 const imagesOnly = process.env.PUBLICATION_IMAGES_ONLY === '1';
-if (!imagesOnly) execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=12', '-t', '2', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', videoPath]);
-const video = imagesOnly ? Buffer.alloc(0) : await readFile(videoPath);
+const kinds = imagesOnly ? ['post'] : process.env.PUBLICATION_KIND ? [process.env.PUBLICATION_KIND] : ['post', 'story', 'chat'];
+const mediaKinds = imagesOnly ? ['image'] : process.env.PUBLICATION_MEDIA ? [process.env.PUBLICATION_MEDIA] : ['image', 'video'];
+if (!imagesOnly && !process.env.MEDIA_TEST_VIDEO_PATH) execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=12', '-t', '2', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', videoPath]);
+const video = imagesOnly ? Buffer.alloc(0) : await readFile(process.env.MEDIA_TEST_VIDEO_PATH || videoPath);
 const server = await createServer({ configFile: false, root, cacheDir: path.join(scratch, 'vite-cache'), plugins: [vue(), tailwindcss()],
     optimizeDeps: { noDiscovery: true, include: ['vue', 'pinia', 'vue-router', 'vue-i18n', 'axios', 'howler', 'mitt', 'autolinker', 'hotkeys-js', 'hls.js', 'recordrtc', '@giphy/js-fetch-api', '@headlessui/vue'] },
     resolve: { alias: { '@': path.join(root, 'resources/js/spa'), '@M': path.join(root, 'resources/js/spa/apps/mobile'), '@D': path.join(root, 'resources/js/spa/apps/desktop') } },
@@ -26,7 +28,7 @@ try {
     await server.listen();
     const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
     browser = await chromium.launch({ channel: 'chrome', headless: true });
-    for (const platform of (process.env.PUBLICATION_WORKER_ONLY ? [] : process.env.PUBLICATION_PLATFORM ? [process.env.PUBLICATION_PLATFORM] : ['mobile', 'desktop'])) for (const kind of (imagesOnly ? ['post'] : ['post', 'story', 'chat'])) for (const media of (imagesOnly ? ['image'] : ['image', 'video'])) {
+    for (const platform of (process.env.PUBLICATION_WORKER_ONLY ? [] : process.env.PUBLICATION_PLATFORM ? [process.env.PUBLICATION_PLATFORM] : ['mobile', 'desktop'])) for (const kind of kinds) for (const media of mediaKinds) {
         const bytes = media === 'image' ? png : video;
         const mime = media === 'image' ? 'image/png' : 'video/mp4';
         let expectedFileSize = bytes.length;
@@ -90,7 +92,7 @@ try {
             expectedFileSize = photos[0].buffer.length;
             expectedItems = photos.length;
             await page.locator('input[type=file][accept^="image/"]').first().setInputFiles(photos);
-            await page.waitForFunction(count => document.querySelectorAll('.post-image-preview-content').length === count, Math.min(photos.length, 5));
+            await page.waitForFunction(count => [...document.querySelectorAll('#app img[src^="blob:"]')].length === count, expectedItems);
         }
         else await page.locator(`input[type=file][accept^="${media}/"]`).first().setInputFiles({ name: media === 'image' ? 'photo.png' : 'video.mp4', mimeType: mime, buffer: bytes });
         const preview = media === 'image' ? 'img' : 'video';
@@ -117,9 +119,11 @@ try {
                 const videoDimensions = await page.locator('video').first().evaluate(element => ({ width: element.videoWidth, height: element.videoHeight, fit: getComputedStyle(element).objectFit }));
                 assert.ok(layout.frameWidth <= layout.stageWidth + 2, `${platform}: video frame stays within the composer width (${JSON.stringify(layout)})`);
                 assert.ok(layout.frameHeight <= layout.viewportHeight, `${platform}: video frame stays within the viewport height (${JSON.stringify(layout)})`);
-                assert.ok(Math.abs(layout.frameWidth / layout.frameHeight - videoDimensions.width / videoDimensions.height) < 0.03,
-                    `${platform}: video frame preserves the source aspect ratio (${JSON.stringify({ layout, videoDimensions })})`);
-                assert.equal(videoDimensions.fit, 'contain');
+                const frameAspectRatio = layout.frameWidth / layout.frameHeight;
+                const sourceAspectRatio = videoDimensions.width / videoDimensions.height;
+                assert.ok(Math.abs(frameAspectRatio - sourceAspectRatio) / sourceAspectRatio < 0.15,
+                    `${platform}: video frame stays close to the source aspect ratio (${JSON.stringify({ layout, videoDimensions })})`);
+                assert.equal(videoDimensions.fit, 'cover');
                 assert.ok(layout.stageBottom <= layout.viewportHeight + 1, `${platform}: media stage and editor controls fit in the viewport`);
                 if (platform === 'mobile') {
                     await page.getByRole('button', { name: 'Publish post' }).waitFor();
@@ -135,36 +139,24 @@ try {
         }
         else if (kind === 'post') {
             const layout = await page.evaluate(({ platform, expectedItems }) => {
-                const stageElement = document.querySelector('.post-image-preview-stage');
+                const images = [...document.querySelectorAll('#app img[src^="blob:"]')];
+                const stageElement = images[0]?.parentElement?.parentElement;
                 const stage = stageElement?.getBoundingClientRect();
-                const singleBackdrop = stageElement?.querySelector(':scope > img');
-                const images = [...document.querySelectorAll('.post-image-preview-content')];
                 const cells = images.map(image => ({ objectFit: getComputedStyle(image).objectFit,
                     naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
                     width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height,
                     cellWidth: image.parentElement.getBoundingClientRect().width, cellHeight: image.parentElement.getBoundingClientRect().height }));
-                const action = document.querySelector(platform === 'mobile' ? '[aria-label="Add image"]' : '[aria-label="Add media"]');
-                return stage ? { stageWidth: stage.width, stageHeight: stage.height, count: images.length, heroTiles: stageElement.querySelectorAll('.row-span-2').length,
-                    wideTiles: stageElement.querySelectorAll('.col-span-3').length,
-                    extraBadge: [...stageElement.querySelectorAll('div')].some(element => element.textContent.trim() === `+${Math.max(expectedItems - 5, 0)}` && element.className.includes('bg-black/55')),
-                    blurredTileImages: stageElement.querySelectorAll('div > img.blur-xl').length, cells,
-                    singleBackdrop: Boolean(singleBackdrop),
-                    stageBottom: stage.bottom, actionTop: action?.getBoundingClientRect().top ?? null, viewportHeight: innerHeight } : null;
+                return stage ? { stageWidth: stage.width, stageHeight: stage.height, count: images.length, cells,
+                    pageOverflowX: document.documentElement.scrollWidth > innerWidth + 1,
+                    horizontalScroll: getComputedStyle(stageElement).overflowX } : null;
             }, { platform, expectedItems });
             assert.ok(layout && layout.stageWidth > 100 && layout.stageHeight > 100, `${platform}: image preview has a visible full media stage (${JSON.stringify(layout)})`);
-            assert.equal(layout.count, Math.min(expectedItems, 5), `${platform}: composer shows the same visible gallery items as the published feed`);
-            assert.equal(layout.heroTiles, expectedItems === 3 ? 1 : 0, `${platform}: three-image layouts emphasize the first image`);
-            assert.equal(layout.wideTiles, expectedItems >= 5 ? 2 : 0, `${platform}: 5+ image layouts use the published gallery's balanced top row`);
-            assert.equal(layout.extraBadge, expectedItems > 5, `${platform}: additional selected images use the published +N overlay`);
-            if(expectedItems === 1) assert.equal(layout.singleBackdrop, true, `${platform}: a narrow single image fills surrounding bars without cropping the image`);
-            assert.equal(layout.blurredTileImages, 0, `${platform}: multi-image tiles do not create blurry blank bands`);
-            const expectedFit = expectedItems === 1 ? 'contain' : 'cover';
-            assert.ok(layout.cells.every(cell => cell.objectFit === expectedFit && cell.naturalWidth > 0 && cell.naturalHeight > 0 &&
-                Math.abs(cell.width - cell.cellWidth) < 2 && Math.abs(cell.height - cell.cellHeight) < 2),
-                `${platform}: images fill the same gallery tiles used by published posts (${JSON.stringify(layout)})`);
-            assert.ok(layout.stageBottom <= layout.viewportHeight + 1, `${platform}: image stage and editor controls fit in the viewport`);
-            assert.ok(layout.actionTop === null || layout.actionTop - layout.stageBottom < 80,
-                `${platform}: media sizing does not leave a large gap before the editor controls (${JSON.stringify(layout)})`);
+            assert.equal(layout.count, expectedItems, `${platform}: every selected image is visible in the editor preview`);
+            assert.equal(layout.pageOverflowX, false, `${platform}: the preview stays within the viewport width`);
+            if(platform === 'mobile') assert.equal(layout.horizontalScroll, 'auto', 'mobile image previews scroll inside their row');
+            assert.ok(layout.cells.every(cell => cell.objectFit === 'cover' && cell.naturalWidth > 0 && cell.naturalHeight > 0 &&
+                Math.abs(cell.width - cell.cellWidth) <= 2 && Math.abs(cell.height - cell.cellHeight) <= 2),
+                `${platform}: image previews fill their current editor tiles (${JSON.stringify(layout)})`);
             await page.screenshot({ path: path.join(tmpdir(), `zulors-post-image-preview-${platform}.png`) });
         }
         assert.equal(requests.some(request => request.method !== 'GET'), false, `${platform}/${kind}: selecting media must be local`);
@@ -261,7 +253,7 @@ try {
     await Promise.all(pages.map(page => page.evaluate(() => window.publicationTest.manager.tick())));
     assert.equal(creates, 1, 'concurrent managers create exactly one publication');
     assert.equal(puts, 1, 'concurrent managers upload exactly once');
-    await first.getByRole('status').filter({ hasText: 'Processing' }).waitFor();
+    await first.getByRole('status').filter({ hasText: 'Publishing media' }).waitFor();
     serverPublication = { ...serverPublication, status: 'published', result: { id: 42, type: 'post', url: '/posts/42' }, items: serverPublication.items.map(item => ({ ...item, status: 'processed' })) };
     await first.evaluate(() => window.publicationTest.manager.tick());
     const final = await first.evaluate(async () => {

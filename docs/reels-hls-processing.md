@@ -18,6 +18,16 @@ instead of storing incomplete media responses. The web and mobile feed players
 prefer HLS, use HLS.js where native HLS is unavailable, and fall back to the
 MP4 if adaptive playback cannot start.
 
+The final bucket (`zulors-media-final`) must allow cross-origin `GET` and
+`HEAD` playback from the website origins and allow the `Range` request header.
+Apply `deploy/r2-final-playback-cors.json` at Cloudflare Dashboard → R2 →
+`zulors-media-final` → Settings → CORS Policy, then purge the
+`media.zulors.com` cache so cached objects receive the updated CORS headers.
+`deploy/check-r2-playback-cors.php`
+creates and deletes a no-store probe object while checking preflight, playlist
+reads, HEAD requests, byte ranges, and exposed `Content-Range` headers. Live
+deployments run this check before promoting a release.
+
 Feed cards render the thumbnail first. The video player attaches playback near
 the viewport. HLS.js warms only the next Reel, starts at the lowest rendition,
 and stops after about 3.5 seconds are buffered. It does not prewarm offline or
