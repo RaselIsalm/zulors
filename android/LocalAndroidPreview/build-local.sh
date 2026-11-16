@@ -5,7 +5,7 @@ SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 ANDROID_PLATFORM="$(find "$SDK/platforms" -maxdepth 1 -mindepth 1 -type d -name 'android-*' | while IFS= read -r candidate; do
 	api_level="${candidate##*/android-}"
 	case "$api_level" in
-		''|*[!0-9]*) continue ;;
+		(''|*[!0-9]*) continue ;;
 	esac
 	printf '%s\n' "$candidate"
 done | sort -V | tail -1)"

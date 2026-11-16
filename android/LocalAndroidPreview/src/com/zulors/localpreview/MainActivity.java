@@ -1056,6 +1056,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new StartupBridge(), "ZulorsStartup");
         webView.addJavascriptInterface(new NativeAuthBridge(), "ZulorsNativeAuth");
         uploadBridge = new ZulorsUploadBridge(this, webView);
+        synchronizeUploadBridgeVisibility(uploadBridge, appInForeground);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             ActivityManager activityManager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
@@ -3367,8 +3368,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (uploadBridge != null) uploadBridge.resumed();
         appInForeground = true;
+        synchronizeUploadBridgeVisibility(uploadBridge, appInForeground);
         recordStartupEvent("activity_resumed", startupSplashReleaseReason);
         completeFlexibleUpdateWhenSafe();
         scheduleFlexibleUpdateCheck(FLEXIBLE_UPDATE_CHECK_DELAY_MS);
@@ -3613,8 +3614,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        if (uploadBridge != null) uploadBridge.paused();
         appInForeground = false;
+        synchronizeUploadBridgeVisibility(uploadBridge, appInForeground);
 
         if (callSessionManager != null) {
             callSessionManager.setAppVisibility(false);
@@ -3625,6 +3626,12 @@ public class MainActivity extends Activity {
         }
 
         super.onPause();
+    }
+
+    static void synchronizeUploadBridgeVisibility(ZulorsUploadBridge bridge, boolean foreground) {
+        if (bridge == null) return;
+        if (foreground) bridge.resumed();
+        else bridge.paused();
     }
 
     private Uri[] collectFileChooserResults(int resultCode, Intent data) {
