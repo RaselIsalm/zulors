@@ -8,7 +8,6 @@ use App\Livewire\User\Onboarding\Base\OnboardingBase;
 use App\Models\Onboard;
 use App\Models\User;
 use App\Services\Relations\FollowService;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -75,12 +74,9 @@ class Username extends OnboardingBase
 
         $this->makeFollowList();
 
-        // The final onboarding request must leave the newly activated account
-        // authenticated before Livewire sends the browser to the home route.
-        Auth::guard('web')->login($user, true);
-        if(request()->hasSession()) {
-            request()->session()->regenerate();
-        }
+        // Signup confirmation already authenticated the account and rotated
+        // its session. Logging in again here would rotate the session ID during
+        // this Livewire request, racing the browser's redirect to the home page.
 
         event(new UserSignupCompletedEvent($user));
 

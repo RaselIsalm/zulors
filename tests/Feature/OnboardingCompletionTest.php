@@ -2,18 +2,12 @@
 
 namespace Tests\Feature;
 
-use App\Database\Configs\Table;
-use App\Enums\NotificationType;
-use App\Enums\User\UserRole;
+use App\Models\EmailConfirmation;
 use App\Enums\User\UserStatus;
-use App\Enums\User\UserType;
-use App\Livewire\User\Onboarding\Username;
-use App\Models\Onboard;
 use App\Models\User;
-use App\Models\UserNotificationSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
-use Livewire\Livewire;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class OnboardingCompletionTest extends TestCase
@@ -22,83 +16,82 @@ class OnboardingCompletionTest extends TestCase
 
     public function test_username_step_marks_signup_complete_and_clears_onboarding_state(): void
     {
-        $user = $this->createUser('pending_signup', 'pending-signup@example.com');
-
-        Onboard::query()->create([
-            'user_id' => $user->id,
-            'step' => 'username',
+        config([
+            'brand.default_theme' => 'light',
+            'wallet.default_balance' => 0,
         ]);
 
-        $this->actingAs($user);
+        $confirmation = EmailConfirmation::query()->create([
+            'email' => 'pending-signup@example.test',
+            'token' => (string) Str::uuid(),
+        ]);
 
-        $usernameStepIndex = array_search('username', array_keys(config('user.onboarding_steps')), true);
+        $confirmationResponse = $this->get(route('user.auth.confirm-signup', ['token' => $confirmation->token]));
+        $confirmationResponse->assertRedirect(route('user.onboarding.index', 'profile'));
 
-        Livewire::test(Username::class, [
-            'stepIndex' => $usernameStepIndex,
-            'stepData' => config('user.onboarding_steps.username'),
-        ])
-            ->set('username', 'completed_signup')
-            ->set('password', 'securepass123')
-            ->call('submitForm')
-            ->assertRedirect(route('user.desktop.index'));
+        $userId = auth()->guard('web')->id();
+        $this->assertNotNull($userId);
 
-        $this->get(route('user.desktop.index'))->assertOk();
-        $this->assertAuthenticatedAs($user);
+        $sessionCookieName = config('session.cookie');
+        $sessionCookie = $confirmationResponse->getCookie($sessionCookieName);
+        $this->assertNotNull($sessionCookie);
 
-        $user->refresh();
+        auth()->forgetGuards();
+
+        $usernamePage = $this->withCookie($sessionCookieName, $sessionCookie->getValue())
+            ->get(route('user.onboarding.index', 'username'))
+            ->assertOk();
+
+        $usernamePageSessionCookie = $usernamePage->getCookie($sessionCookieName);
+        $this->assertNotNull($usernamePageSessionCookie);
+
+        preg_match('/wire:snapshot="([^"]+)"/', $usernamePage->getContent(), $snapshotMatch);
+        $this->assertArrayHasKey(1, $snapshotMatch, 'The onboarding page should render its Livewire snapshot.');
+
+        $snapshot = html_entity_decode($snapshotMatch[1], ENT_QUOTES | ENT_HTML5);
+        $this->assertIsArray(json_decode($snapshot, true));
+
+        $livewireResponse = $this->withCredentials()
+            ->withCookie($sessionCookieName, $usernamePageSessionCookie->getValue())
+            ->postJson(app('livewire')->getUpdateUri(), [
+                'components' => [[
+                    'snapshot' => $snapshot,
+                    'updates' => [
+                        'username' => 'completed_signup',
+                        'password' => 'securepass123',
+                    ],
+                    'calls' => [[
+                        'path' => '',
+                        'method' => 'submitForm',
+                        'params' => [],
+                    ]],
+                ]],
+            ], ['X-Livewire' => 'true'])
+            ->assertOk();
+
+        $livewireResponse->assertJsonPath('components.0.effects.redirect', route('user.desktop.index'));
+
+        $updatedSessionCookie = $livewireResponse->getCookie($sessionCookieName);
+        $this->assertNotNull($updatedSessionCookie);
+        $this->assertSame(
+            $usernamePageSessionCookie->getValue(),
+            $updatedSessionCookie->getValue(),
+            'The final Livewire request should keep the session cookie established by email confirmation.'
+        );
+
+        auth()->forgetGuards();
+        $this->withCookie($sessionCookieName, $updatedSessionCookie->getValue())
+            ->get(route('user.desktop.index'))
+            ->assertOk();
+
+        $this->assertAuthenticatedAs(User::query()->findOrFail($userId));
+
+        $user = User::query()->findOrFail($userId);
 
         $this->assertSame(UserStatus::ACTIVE, $user->status);
         $this->assertTrue(Hash::check('securepass123', $user->password));
-        $this->assertDatabaseMissing(Table::ONBOARDINGS, [
+        $this->assertDatabaseMissing('onboards', [
             'user_id' => $user->id,
         ]);
-    }
-
-    private function createUser(string $username, string $email): User
-    {
-        $user = User::query()->create([
-            'first_name' => 'Pending',
-            'last_name' => 'Signup',
-            'username' => $username,
-            'caption' => '@' . $username,
-            'email' => $email,
-            'phone' => '',
-            'website' => '',
-            'bio' => '',
-            'country' => null,
-            'city' => null,
-            'birth_day' => null,
-            'birth_month' => null,
-            'birth_year' => null,
-            'age' => null,
-            'gender' => 'male',
-            'last_active' => now()->timestamp,
-            'language' => 'en',
-            'avatar' => null,
-            'cover' => null,
-            'verified' => false,
-            'tips' => [],
-            'email_verified_at' => now(),
-            'password' => Hash::make('password'),
-            'role' => UserRole::USER,
-            'theme' => 'light',
-            'publications_count' => 0,
-            'followers_count' => 0,
-            'following_count' => 0,
-            'status' => UserStatus::ONBOARDING,
-            'type' => UserType::AUTHOR,
-        ]);
-
-        UserNotificationSettings::query()->create([
-            'user_id' => $user->id,
-            'type' => NotificationType::EMAIL,
-        ]);
-
-        UserNotificationSettings::query()->create([
-            'user_id' => $user->id,
-            'type' => NotificationType::PUSH,
-        ]);
-
-        return $user;
     }
 }
