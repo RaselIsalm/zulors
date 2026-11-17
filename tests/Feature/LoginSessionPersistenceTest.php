@@ -7,6 +7,7 @@ use App\Enums\User\UserStatus;
 use App\Enums\User\UserType;
 use App\Livewire\User\Auth\Login as LoginComponent;
 use App\Models\User;
+use App\Settings\AuthSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
@@ -18,7 +19,21 @@ class LoginSessionPersistenceTest extends TestCase
 
     public function test_email_login_keeps_its_session_through_the_home_redirect(): void
     {
-        config(['brand.default_theme' => 'light']);
+        AuthSettings::fake([
+            'captcha_enabled' => false,
+            'registration_enabled' => true,
+            'login_enabled' => true,
+            'reg_verification_enabled' => false,
+            'auto_verification_enabled' => false,
+            'switch_account_enabled' => false,
+            'link_accounts_enabled' => false,
+            'reg_verification_type' => 'email',
+        ]);
+
+        config([
+            'brand.default_theme' => 'light',
+            'features.login.enabled' => true,
+        ]);
 
         $user = User::query()->create([
             'first_name' => 'Session',
