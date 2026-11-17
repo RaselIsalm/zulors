@@ -21,8 +21,10 @@ class Profile extends OnboardingBase
     public function mount()
     {
         $this->microSteps = [
-            'first_name' => false,
-            'last_name' => false,
+            // Social providers usually supply these fields already. Do not
+            // make users click through steps that are already complete.
+            'first_name' => filled(me()->first_name),
+            'last_name' => filled(me()->last_name),
             'birthday' => false,
             'gender' => false
         ];
@@ -65,10 +67,29 @@ class Profile extends OnboardingBase
         }
 
         else{
-            if(empty(me()->birth_day) || empty(me()->birth_month) || empty(me()->birth_year)) {
+            $month = is_numeric($this->birthMonth) ? (int) $this->birthMonth : 0;
+            $day = is_numeric($this->birthDay) ? (int) $this->birthDay : 0;
+            $year = is_numeric($this->birthYear) ? (int) $this->birthYear : 0;
+            $normalizedMonth = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
+            $allowedYears = array_column($this->birthYearsList, 'key');
+
+            if(
+                ! in_array($normalizedMonth, array_column($this->birthMonthsList, 'key'), true) ||
+                ! in_array((string) $year, $allowedYears, true) ||
+                ! checkdate($month, $day, $year)
+            ) {
                 $this->addError('birthdateError', __('auth.birthdate_required'));
             }
             else{
+                // Save the selected values with the Continue action itself.
+                // This avoids depending on three separate live model requests
+                // having completed before the user taps Continue.
+                me()->update([
+                    'birth_month' => $normalizedMonth,
+                    'birth_day' => (string) $day,
+                    'birth_year' => (string) $year,
+                ]);
+
                 $this->redirect($this->getNextStepRoute($this->stepIndex));
             }
         }
@@ -117,29 +138,15 @@ class Profile extends OnboardingBase
         }
     }
 
-    public function updatedBirthDay($value) {
-        if(is_numeric($value)) {
-            me()->update([
-                'birth_day' => $value
-            ]);
-        }
-    }
-
     public function updatedBirthMonth($value) {
         if(is_numeric($value) && in_array($value, ['01','02','03','04','05','06','07','08','09','10','11', '12'])) {
-            me()->update([
-                'birth_month' => $value
-            ]);
-            
             $this->assignMonthDays();
         }
     }
 
     public function updatedBirthYear($value) {
         if(is_numeric($value)) {
-            me()->update([
-                'birth_year' => $value
-            ]);
+            $this->assignMonthDays();
         }
     }
 
