@@ -83,14 +83,20 @@ jobs:
               ->where('mediaable_type', App\Models\Post::class)
               ->where('metadata->provider', 'r2')
               ->get(['metadata']);
-          $counts = ['total' => $items->count(), 'hls_ready' => 0, 'hls_unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'current_encoding' => 0];
+          $counts = [
+              'total' => $items->count(),
+              'hls_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
+              'background_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
+              'current_encoding' => 0,
+          ];
           foreach ($items as $item) {
               $metadata = $item->metadata ?? [];
-              $state = data_get($metadata, 'playback.hls_state');
-              if ($state === 'ready') $counts['hls_ready']++;
-              elseif (! $state) $counts['hls_unset']++;
-              foreach (['queued', 'processing', 'failed'] as $candidate) {
-                  if (data_get($metadata, 'background_processing_state') === $candidate || $state === $candidate) $counts[$candidate]++;
+              foreach ([
+                  'hls_state' => data_get($metadata, 'playback.hls_state'),
+                  'background_state' => data_get($metadata, 'background_processing_state'),
+              ] as $field => $value) {
+                  $state = $value ?: 'unset';
+                  $counts[$field][array_key_exists($state, $counts[$field]) ? $state : 'other']++;
               }
               if (data_get($metadata, 'playback.encoding_version') === App\Jobs\User\Timeline\GeneratePostVideoHls::ENCODING_VERSION) $counts['current_encoding']++;
           }
