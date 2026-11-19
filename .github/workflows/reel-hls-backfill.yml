@@ -222,8 +222,19 @@ jobs:
           $queueConnection = (string) config('media.queue_connection');
           $pendingByQueue = [];
           try {
+              $redisQueue = Illuminate\Support\Facades\Queue::connection($queueConnection);
               foreach ($queueNames as $queueName) {
-                  $pendingByQueue[$queueName] = (int) Illuminate\Support\Facades\Queue::connection($queueConnection)->size($queueName);
+                  $payloads = collect($redisQueue->getConnection()->lrange($redisQueue->getQueue($queueName), 0, 49))
+                      ->map(fn ($payload) => json_decode((string) $payload, true))
+                      ->filter(fn ($payload) => is_array($payload))
+                      ->countBy(fn ($payload) => (string) data_get($payload, 'displayName', data_get($payload, 'job', 'unknown')))
+                      ->all();
+                  $pendingByQueue[$queueName] = [
+                      'ready' => (int) $redisQueue->pendingSize($queueName),
+                      'delayed' => (int) $redisQueue->delayedSize($queueName),
+                      'reserved' => (int) $redisQueue->reservedSize($queueName),
+                      'recent_job_classes' => $payloads,
+                  ];
               }
           } catch (Throwable $exception) {
               $pendingByQueue['error'] = $exception::class;
