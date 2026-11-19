@@ -37,6 +37,14 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame([], GeneratePostVideoHls::renditionHeightsForSource(180));
     }
 
+    public function test_r2_disks_bound_connection_and_request_timeouts(): void
+    {
+        foreach (['r2_temp', 'r2_final'] as $disk) {
+            $this->assertSame(10.0, (float) config("filesystems.disks.{$disk}.http.connect_timeout"));
+            $this->assertSame(180.0, (float) config("filesystems.disks.{$disk}.http.timeout"));
+        }
+    }
+
     public function test_hls_uses_the_optimized_playback_object_when_an_original_archive_exists(): void
     {
         Storage::fake('r2_final');

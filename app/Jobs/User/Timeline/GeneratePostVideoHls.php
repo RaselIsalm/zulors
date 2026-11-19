@@ -88,6 +88,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         $workDirectory = storage_path('app/tmp/reel-hls/'.$media->id.'-'.bin2hex(random_bytes(5)));
         $sourcePath = $workDirectory.'/source.'.($this->safeExtension($source['extension']) ?: 'mp4');
         @mkdir($workDirectory, 0775, true);
+        $failureStage = 'initialize';
 
         try {
             $this->updateMetadata($media, function (array $next) use ($sourceSignature, $attempt): array {
@@ -110,6 +111,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 'queue_age_seconds' => $queueAgeSeconds,
             ]);
 
+            $failureStage = 'source_download';
             $downloadStartedAt = microtime(true);
             $this->downloadSource($source, $sourcePath, function (int $downloadedBytes, int $totalBytes) use ($media): void {
                 static $lastHeartbeat = 0;
@@ -133,6 +135,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 'download_duration_seconds' => round(microtime(true) - $downloadStartedAt, 3),
                 'source_bytes' => (int) ($source['size'] ?? 0),
             ]);
+            $failureStage = 'inspect_source';
             $dimensions = $videoUploadService->getVideoDimensions($sourcePath);
             $sourceHeight = (int) ($dimensions['height'] ?? 0);
             $sourceWidth = (int) ($dimensions['width'] ?? 0);
@@ -160,8 +163,20 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 @mkdir($renditionDirectory, 0775, true);
                 $playlistPath = $renditionDirectory.'/index.m3u8';
 
+                $failureStage = 'encode_rendition_'.$height;
+                $encodeStartedAt = microtime(true);
+                Log::channel('performance')->info('reel_hls_rendition_encode_started', [
+                    'height' => $height,
+                ]);
                 $this->runRendition($ffmpeg, $sourcePath, $playlistPath, $profile, $height, $workDirectory, $media);
-                $this->uploadDirectory($outputDisk, $renditionDirectory, $outputPrefix.'/v'.$height);
+                Log::channel('performance')->info('reel_hls_rendition_encode_completed', [
+                    'height' => $height,
+                    'duration_seconds' => round(microtime(true) - $encodeStartedAt, 3),
+                    'segments' => count(glob($renditionDirectory.'/segment_*.ts') ?: []),
+                ]);
+
+                $failureStage = 'upload_rendition_'.$height;
+                $this->uploadDirectory($outputDisk, $renditionDirectory, $outputPrefix.'/v'.$height, $media, $height);
 
                 $width = max(2, (int) (2 * round(($sourceWidth * $height / max(1, $sourceHeight)) / 2)));
                 $renditions[] = [
@@ -189,6 +204,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 
             $masterPath = $workDirectory.'/master.m3u8';
             file_put_contents($masterPath, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n".implode("\n", $playlistEntries)."\n");
+            $failureStage = 'upload_master_playlist';
             $this->putFile($outputDisk, $outputPrefix.'/master.m3u8', $masterPath, 'application/vnd.apple.mpegurl');
 
             $this->updateMetadata($media, function (array $next) use ($diskName, $outputPrefix, $renditions, $sourceSignature, $dimensions): array {
@@ -219,8 +235,9 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 'outcome' => 'ready',
             ]);
         } catch (Throwable $exception) {
-            Log::warning('Reel HLS generation attempt failed.', [
+            Log::channel('performance')->warning('Reel HLS generation attempt failed.', [
                 'media_id' => $media->id,
+                'stage' => $failureStage,
                 'exception' => $exception::class,
             ]);
 
@@ -363,10 +380,14 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function uploadDirectory($disk, string $localDirectory, string $remoteDirectory): void
+    private function uploadDirectory($disk, string $localDirectory, string $remoteDirectory, Media $media, int $height): void
     {
         $files = glob($localDirectory.'/*') ?: [];
         sort($files);
+        $startedAt = microtime(true);
+        $lastHeartbeatAt = time();
+        $uploadedBytes = 0;
+        $uploadedFiles = 0;
 
         foreach ($files as $file) {
             if (! is_file($file)) {
@@ -377,7 +398,25 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 ? 'application/vnd.apple.mpegurl'
                 : 'video/mp2t';
             $this->putFile($disk, $remoteDirectory.'/'.basename($file), $file, $contentType);
+            $uploadedFiles++;
+            $uploadedBytes += (int) (filesize($file) ?: 0);
+
+            if (time() - $lastHeartbeatAt >= 30) {
+                $this->updateMetadata($media, static function (array $metadata): array {
+                    $metadata['background_processing_updated_at'] = now()->toIso8601String();
+
+                    return $metadata;
+                }, false);
+                $lastHeartbeatAt = time();
+            }
         }
+
+        Log::channel('performance')->info('reel_hls_rendition_upload_completed', [
+            'height' => $height,
+            'file_count' => $uploadedFiles,
+            'bytes' => $uploadedBytes,
+            'duration_seconds' => round(microtime(true) - $startedAt, 3),
+        ]);
     }
 
     private function putFile($disk, string $path, string $localPath, string $contentType): void

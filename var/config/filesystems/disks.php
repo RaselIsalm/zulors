@@ -48,6 +48,10 @@ return [
 		'bucket' => env('R2_TEMP_BUCKET'),
 		'endpoint' => env('R2_ENDPOINT'),
 		'use_path_style_endpoint' => env('R2_USE_PATH_STYLE_ENDPOINT', true),
+		'http' => [
+			'connect_timeout' => (float) env('R2_CONNECT_TIMEOUT_SECONDS', 10),
+			'timeout' => (float) env('R2_HTTP_TIMEOUT_SECONDS', 180),
+		],
 		'throw' => false,
 	],
 
@@ -68,6 +72,10 @@ return [
 		'url' => env('R2_PUBLIC_URL'),
 		'endpoint' => env('R2_ENDPOINT'),
 		'use_path_style_endpoint' => env('R2_USE_PATH_STYLE_ENDPOINT', true),
+		'http' => [
+			'connect_timeout' => (float) env('R2_CONNECT_TIMEOUT_SECONDS', 10),
+			'timeout' => (float) env('R2_HTTP_TIMEOUT_SECONDS', 180),
+		],
 		'throw' => false,
 	],
 
