@@ -10,6 +10,7 @@ on:
         options:
           - backfill
           - status
+          - edge-smoke
       limit:
         description: Maximum videos to queue (1–200; the current legacy batch is 15).
         required: true
@@ -45,7 +46,7 @@ jobs:
       - name: Check operation and deploy secrets
         run: |
           test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
-          case "$OPERATION" in backfill|status) ;; *) exit 1 ;; esac
+          case "$OPERATION" in backfill|status|edge-smoke) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
@@ -69,6 +70,47 @@ jobs:
 
           if [[ "$operation" == "backfill" ]]; then
             php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
+            exit
+          fi
+
+          if [[ "$operation" == "edge-smoke" ]]; then
+            master_url="$(php -r '
+              require "vendor/autoload.php";
+              $app = require "bootstrap/app.php";
+              $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+              $media = \App\Models\Media::query()
+                  ->where("type", \App\Enums\Media\MediaType::VIDEO->value)
+                  ->where("status", \App\Enums\Media\MediaStatus::PROCESSED->value)
+                  ->where("mediaable_type", \App\Models\Post::class)
+                  ->where("metadata->provider", "r2")
+                  ->where("metadata->playback->hls_state", "ready")
+                  ->orderBy("id")
+                  ->first();
+              echo (string) data_get($media?->metadata, "playback.hls");
+            ' )"
+            test -n "$master_url"
+            work_dir="$(mktemp -d)"
+            trap 'rm -rf "$work_dir"' EXIT
+
+            probe_asset() {
+              local label="$1" url="$2" body="$3" headers="$4" result code ttfb bytes cache
+              result="$(curl -sS --max-time 25 -D "$headers" -o "$body" -w '%{http_code} %{time_starttransfer} %{size_download}' "$url")"
+              read -r code ttfb bytes <<< "$result"
+              cache="$(awk 'tolower($1)=="cf-cache-status:" {gsub(/\r/, "", $2); value=$2} END {print value ? value : "missing"}' "$headers")"
+              printf '%s http=%s ttfb=%ss bytes=%s cf-cache=%s\n' "$label" "$code" "$ttfb" "$bytes" "$cache"
+              test "$code" = 200
+            }
+
+            probe_asset master-first "$master_url" "$work_dir/master.m3u8" "$work_dir/master.headers"
+            variant_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$work_dir/master.m3u8")"
+            test -n "$variant_path"
+            variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
+            probe_asset variant-playlist "$variant_url" "$work_dir/variant.m3u8" "$work_dir/variant.headers"
+            segment_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$work_dir/variant.m3u8")"
+            test -n "$segment_path"
+            segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
+            probe_asset segment-first "$segment_url" /dev/null "$work_dir/segment-first.headers"
+            probe_asset segment-repeat "$segment_url" /dev/null "$work_dir/segment-repeat.headers"
             exit
           fi
 
