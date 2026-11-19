@@ -12,6 +12,7 @@ on:
           - status
           - edge-smoke
           - auth-smoke
+          - access-audit
       limit:
         description: Maximum videos to queue (1–200; the current legacy batch is 15).
         required: true
@@ -47,7 +48,7 @@ jobs:
       - name: Check operation and deploy secrets
         run: |
           test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
-          case "$OPERATION" in backfill|status|edge-smoke|auth-smoke) ;; *) exit 1 ;; esac
+          case "$OPERATION" in backfill|status|edge-smoke|auth-smoke|access-audit) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
@@ -68,6 +69,16 @@ jobs:
           operation="$2"
           limit="$3"
           cd "$live_path"
+
+          if [[ "$operation" == "access-audit" ]]; then
+            printf 'ssh_user=%s\n' "$(id -un)"
+            printf 'uid=%s\n' "$(id -u)"
+            printf 'groups=%s\n' "$(id -Gn)"
+            if [[ "$(id -u)" == 0 ]]; then echo 'root=yes'; else echo 'root=no'; fi
+            if sudo -n true >/dev/null 2>&1; then echo 'passwordless_sudo=yes'; else echo 'passwordless_sudo=no'; fi
+            if [[ -w "$live_path" ]]; then echo 'deploy_path_writable=yes'; else echo 'deploy_path_writable=no'; fi
+            exit
+          fi
 
           if [[ "$operation" == "backfill" ]]; then
             php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
