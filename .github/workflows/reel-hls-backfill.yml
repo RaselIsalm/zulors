@@ -195,18 +195,28 @@ jobs:
               }
               if (data_get($metadata, 'playback.encoding_version') === App\Jobs\User\Timeline\GeneratePostVideoHls::ENCODING_VERSION) $counts['current_encoding']++;
           }
-          $queueName = (string) config('media.queues.video');
+          $queueNames = array_values(array_unique(array_filter([
+              (string) config('media.queues.video_high'),
+              (string) config('media.queues.video'),
+              (string) config('media.queues.video_normal'),
+          ])));
           $queueConnection = (string) config('media.queue_connection');
+          $pendingByQueue = [];
           try {
-              $pendingJobs = (int) Illuminate\Support\Facades\Queue::connection($queueConnection)->size($queueName);
+              foreach ($queueNames as $queueName) {
+                  $pendingByQueue[$queueName] = (int) Illuminate\Support\Facades\Queue::connection($queueConnection)->size($queueName);
+              }
           } catch (Throwable $exception) {
-              $pendingJobs = null;
+              $pendingByQueue['error'] = $exception::class;
           }
+          $processList = (string) shell_exec('ps -eo args= 2>/dev/null');
+          preg_match_all('/(?:^|\\s)(?:\\S*php\\S*\\s+)?artisan\\s+(?:horizon(?::work)?|queue:work)(?=\\s|$)/m', $processList, $workerProcesses);
+          $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
           $counts['video_queue'] = [
               'connection' => $queueConnection,
-              'name' => $queueName,
-              'pending' => $pendingJobs,
-              'workers' => (int) trim((string) shell_exec("pgrep -fc '[q]ueue:work' 2>/dev/null || true")),
+              'pending_by_queue' => $pendingByQueue,
+              'horizon' => str_contains($horizonStatusOutput, 'running') ? 'running' : 'not_running',
+              'worker_processes' => count($workerProcesses[0]),
           ];
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
           PHP
