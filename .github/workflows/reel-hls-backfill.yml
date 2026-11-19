@@ -193,7 +193,7 @@ jobs:
               $pair = $hlsState.'|'.$backgroundState;
               $counts['hls_background_pairs'][$pair] = ($counts['hls_background_pairs'][$pair] ?? 0) + 1;
               $updatedAt = data_get($metadata, 'background_processing_updated_at');
-              $updateAge = filled($updatedAt) ? now()->diffInMinutes(\Illuminate\Support\Carbon::parse($updatedAt)) : null;
+              $updateAge = filled($updatedAt) ? abs(now()->diffInMinutes(\Illuminate\Support\Carbon::parse($updatedAt))) : null;
               if ($hlsState === 'queued' && $updateAge !== null) {
                   $counts['hls_job_progress']['queued_max_age_minutes'] = max($counts['hls_job_progress']['queued_max_age_minutes'], $updateAge);
               }
