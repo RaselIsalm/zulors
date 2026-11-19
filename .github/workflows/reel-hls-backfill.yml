@@ -306,12 +306,25 @@ jobs:
               ->values()
               ->all();
           $sourceFiles = glob(storage_path('app/tmp/reel-hls/*/source.*')) ?: [];
-          $scratch = ['source_files' => count($sourceFiles), 'source_bytes' => 0, 'largest_source_bytes' => 0, 'free_disk_bytes' => (int) (disk_free_space(storage_path()) ?: 0), 'source_details' => []];
+          $scratch = ['source_files' => count($sourceFiles), 'source_bytes' => 0, 'largest_source_bytes' => 0, 'free_disk_bytes' => (int) (disk_free_space(storage_path()) ?: 0), 'source_details' => [], 'work_details' => []];
           foreach ($sourceFiles as $sourceFile) {
               $size = (int) (filesize($sourceFile) ?: 0);
               $scratch['source_bytes'] += $size;
               $scratch['largest_source_bytes'] = max($scratch['largest_source_bytes'], $size);
               $scratch['source_details'][] = ['work_id' => basename(dirname($sourceFile)), 'bytes' => $size, 'last_write_age_seconds' => max(0, time() - (int) (filemtime($sourceFile) ?: time()))];
+          }
+          foreach (glob(storage_path('app/tmp/reel-hls/*'), GLOB_ONLYDIR) ?: [] as $workDirectory) {
+              $details = ['work_id' => basename($workDirectory), 'files' => 0, 'segments' => 0, 'playlists' => 0, 'output_bytes' => 0, 'newest_file_age_seconds' => null];
+              foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($workDirectory, FilesystemIterator::SKIP_DOTS)) as $entry) {
+                  if (! $entry->isFile()) continue;
+                  $details['files']++;
+                  $details['segments'] += str_ends_with($entry->getFilename(), '.ts') ? 1 : 0;
+                  $details['playlists'] += str_ends_with($entry->getFilename(), '.m3u8') ? 1 : 0;
+                  $details['output_bytes'] += (int) $entry->getSize();
+                  $age = max(0, time() - (int) $entry->getMTime());
+                  $details['newest_file_age_seconds'] = $details['newest_file_age_seconds'] === null ? $age : min($details['newest_file_age_seconds'], $age);
+              }
+              $scratch['work_details'][] = $details;
           }
           $hlsLogEvents = ['started' => 0, 'completed' => 0, 'attempt_failed' => 0, 'job_failed' => 0];
           $hlsLogLatestAt = null;
