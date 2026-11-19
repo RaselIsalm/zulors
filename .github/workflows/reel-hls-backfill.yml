@@ -11,6 +11,7 @@ on:
           - backfill
           - status
           - edge-smoke
+          - auth-smoke
       limit:
         description: Maximum videos to queue (1–200; the current legacy batch is 15).
         required: true
@@ -46,7 +47,7 @@ jobs:
       - name: Check operation and deploy secrets
         run: |
           test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
-          case "$OPERATION" in backfill|status|edge-smoke) ;; *) exit 1 ;; esac
+          case "$OPERATION" in backfill|status|edge-smoke|auth-smoke) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
@@ -111,6 +112,57 @@ jobs:
             segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
             probe_asset segment-first "$segment_url" /dev/null "$work_dir/segment-first.headers"
             probe_asset segment-repeat "$segment_url" /dev/null "$work_dir/segment-repeat.headers"
+            exit
+          fi
+
+          if [[ "$operation" == "auth-smoke" ]]; then
+            php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+          $app = require 'bootstrap/app.php';
+          $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+          $post = App\Models\Post::query()
+              ->where('status', App\Enums\Post\PostStatus::ACTIVE->value)
+              ->whereHas('user', fn ($query) => $query->active())
+              ->whereHas('media', fn ($query) => $query
+                  ->where('type', App\Enums\Media\MediaType::VIDEO->value)
+                  ->where('status', App\Enums\Media\MediaStatus::PROCESSED->value)
+                  ->where('metadata->provider', 'r2')
+                  ->where('metadata->playback->hls_state', 'ready'))
+              ->orderByDesc('id')
+              ->first();
+          $viewers = App\Models\User::active()
+              ->whereRaw('LOWER(email) LIKE ?', ['%.test'])
+              ->orderBy('id')
+              ->limit(2)
+              ->get();
+          if (! $post || $viewers->count() < 2) {
+              echo json_encode(['ready_hls_post' => (bool) $post, 'test_viewers' => $viewers->count(), 'result' => 'insufficient_test_data']), PHP_EOL;
+              exit(2);
+          }
+          $url = rtrim((string) config('app.url'), '/').'/api/timeline/post/'.rawurlencode((string) $post->hash_id);
+          $failures = 0;
+          foreach ($viewers as $index => $viewer) {
+              $temporaryToken = $viewer->createToken('temporary-reel-hls-live-smoke');
+              try {
+                  $response = Illuminate\Support\Facades\Http::withToken($temporaryToken->plainTextToken)
+                      ->acceptJson()
+                      ->timeout(20)
+                      ->get($url, ['without_comments' => 1]);
+                  $media = (array) $response->json('data.post.relations.media', []);
+                  $hlsCount = collect($media)->filter(fn ($item) => filled(data_get($item, 'metadata.playback.hls')))->count();
+                  $passed = $response->successful() && $hlsCount > 0;
+                  if (! $passed) $failures++;
+                  echo json_encode(['viewer' => $index + 1, 'http' => $response->status(), 'hls_urls' => $hlsCount, 'result' => $passed ? 'pass' : 'fail']), PHP_EOL;
+              } catch (Throwable $exception) {
+                  $failures++;
+                  echo json_encode(['viewer' => $index + 1, 'result' => 'request_error', 'type' => $exception::class]), PHP_EOL;
+              } finally {
+                  $temporaryToken->accessToken->delete();
+              }
+          }
+          exit($failures ? 1 : 0);
+          PHP
             exit
           fi
 
