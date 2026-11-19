@@ -283,6 +283,24 @@ jobs:
               $scratch['source_bytes'] += $size;
               $scratch['largest_source_bytes'] = max($scratch['largest_source_bytes'], $size);
           }
+          $hlsLogEvents = ['started' => 0, 'completed' => 0, 'attempt_failed' => 0, 'job_failed' => 0];
+          $hlsLogLatestAt = null;
+          foreach (glob(storage_path('logs/performance*.log')) ?: [] as $logFile) {
+              foreach (file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $logLine) {
+                  foreach (array_keys($hlsLogEvents) as $event) {
+                      $needle = match ($event) {
+                          'started' => 'reel_hls_job_started',
+                          'completed' => 'reel_hls_job_completed',
+                          'attempt_failed' => 'Reel HLS generation attempt failed.',
+                          'job_failed' => 'reel_hls_job_failed',
+                      };
+                      if (str_contains($logLine, $needle)) {
+                          $hlsLogEvents[$event]++;
+                          if (preg_match('/^\\[([^]]+)\\]/', $logLine, $matches)) $hlsLogLatestAt = $matches[1];
+                      }
+                  }
+              }
+          }
           $counts['video_queue'] = [
               'connection' => $queueConnection,
               'pending_by_queue' => $pendingByQueue,
@@ -291,6 +309,7 @@ jobs:
               'recent_video_jobs' => $recentVideoJobs,
           ] + $processMetrics;
           $counts['worker_scratch'] = $scratch;
+          $counts['hls_log_events'] = $hlsLogEvents + ['latest_event_at' => $hlsLogLatestAt];
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
           PHP
           REMOTE
