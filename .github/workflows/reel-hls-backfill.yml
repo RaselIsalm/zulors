@@ -127,6 +127,7 @@ jobs:
               ->get(['metadata']);
           $counts = [
               'total' => $items->count(),
+              'active_test_accounts' => App\Models\User::active()->whereRaw('LOWER(email) LIKE ?', ['%.test'])->count(),
               'hls_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'background_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'current_encoding' => 0,
