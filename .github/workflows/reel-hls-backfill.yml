@@ -195,6 +195,19 @@ jobs:
               }
               if (data_get($metadata, 'playback.encoding_version') === App\Jobs\User\Timeline\GeneratePostVideoHls::ENCODING_VERSION) $counts['current_encoding']++;
           }
+          $queueName = (string) config('media.queues.video');
+          $queueConnection = (string) config('media.queue_connection');
+          try {
+              $pendingJobs = (int) Illuminate\Support\Facades\Queue::connection($queueConnection)->size($queueName);
+          } catch (Throwable $exception) {
+              $pendingJobs = null;
+          }
+          $counts['video_queue'] = [
+              'connection' => $queueConnection,
+              'name' => $queueName,
+              'pending' => $pendingJobs,
+              'workers' => (int) trim((string) shell_exec("pgrep -fc '[q]ueue:work' 2>/dev/null || true")),
+          ];
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
           PHP
           REMOTE
