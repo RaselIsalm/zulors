@@ -253,11 +253,19 @@ jobs:
               }
           }
           $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
+          $sourceFiles = glob(storage_path('app/tmp/reel-hls/*/source.*')) ?: [];
+          $scratch = ['source_files' => count($sourceFiles), 'source_bytes' => 0, 'largest_source_bytes' => 0, 'free_disk_bytes' => (int) (disk_free_space(storage_path()) ?: 0)];
+          foreach ($sourceFiles as $sourceFile) {
+              $size = (int) (filesize($sourceFile) ?: 0);
+              $scratch['source_bytes'] += $size;
+              $scratch['largest_source_bytes'] = max($scratch['largest_source_bytes'], $size);
+          }
           $counts['video_queue'] = [
               'connection' => $queueConnection,
               'pending_by_queue' => $pendingByQueue,
               'horizon' => str_contains($horizonStatusOutput, 'running') ? 'running' : 'not_running',
           ] + $processMetrics;
+          $counts['worker_scratch'] = $scratch;
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
           PHP
           REMOTE
