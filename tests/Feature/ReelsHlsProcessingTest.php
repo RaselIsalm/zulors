@@ -37,10 +37,10 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame([], GeneratePostVideoHls::renditionHeightsForSource(180));
     }
 
-    public function test_r2_hls_url_is_only_exposed_to_the_enabled_allowlist_and_internal_signature_is_hidden(): void
+    public function test_r2_hls_url_is_exposed_to_all_viewers_when_enabled_and_internal_signature_is_hidden(): void
     {
         Storage::fake('r2_final');
-        config(['media.reels_hls.enabled' => true, 'media.reels_hls.user_ids' => []]);
+        config(['media.reels_hls.enabled' => true]);
         $owner = $this->user();
         $post = $this->createPost($owner);
         $media = $this->video($post, [
@@ -54,33 +54,27 @@ class ReelsHlsProcessingTest extends TestCase
             ],
         ]);
 
-        $viewer = $this->user();
-        $hidden = $this->resourceFor($media, $viewer);
-        $this->assertStringContainsString('uploads/posts/source.mp4', $hidden['source_url']);
-        $this->assertArrayNotHasKey('hls', $hidden['metadata']['playback']);
-        $this->assertArrayNotHasKey('hls_source_signature', $hidden['metadata']['playback']);
-        $this->assertSame('ready', $hidden['metadata']['playback_state']);
-        $this->assertSame('processed', $hidden['metadata']['background_processing_state']);
-        $this->assertSame('ready', $hidden['metadata']['playback']['renditions'][0]['state']);
+        $viewers = [$this->user(), $this->user(), null];
 
-        config(['media.reels_hls.user_ids' => [(string) $viewer->id]]);
-        $visible = $this->resourceFor($media, $viewer);
-        $this->assertSame('https://cdn.example.test/master.m3u8', $visible['metadata']['playback']['hls']);
-        $this->assertArrayNotHasKey('hls_source_signature', $visible['metadata']['playback']);
-
-        config(['media.reels_hls.user_ids' => ['*']]);
-        $wildcardVisible = $this->resourceFor($media, $this->user());
-        $this->assertSame('https://cdn.example.test/master.m3u8', $wildcardVisible['metadata']['playback']['hls']);
+        foreach ($viewers as $viewer) {
+            $visible = $this->resourceFor($media, $viewer);
+            $this->assertStringContainsString('uploads/posts/source.mp4', $visible['source_url']);
+            $this->assertSame('https://cdn.example.test/master.m3u8', $visible['metadata']['playback']['hls']);
+            $this->assertArrayNotHasKey('hls_source_signature', $visible['metadata']['playback']);
+            $this->assertSame('ready', $visible['metadata']['playback_state']);
+            $this->assertSame('processed', $visible['metadata']['background_processing_state']);
+            $this->assertSame('ready', $visible['metadata']['playback']['renditions'][0]['state']);
+        }
 
         config(['media.reels_hls.enabled' => false]);
-        $disabled = $this->resourceFor($media, $viewer);
+        $disabled = $this->resourceFor($media, $viewers[0]);
         $this->assertArrayNotHasKey('hls', $disabled['metadata']['playback']);
     }
 
     public function test_cloudflare_stream_playback_is_unchanged_by_the_r2_hls_rollout_gate(): void
     {
         Storage::fake('r2_final');
-        config(['media.reels_hls.enabled' => false, 'media.reels_hls.user_ids' => []]);
+        config(['media.reels_hls.enabled' => false]);
         $owner = $this->user();
         $post = $this->createPost($owner);
         $media = $this->video($post, [
@@ -305,7 +299,7 @@ class ReelsHlsProcessingTest extends TestCase
         ])->assertNoContent();
     }
 
-    private function resourceFor(Media $media, User $viewer): array
+    private function resourceFor(Media $media, ?User $viewer): array
     {
         $request = Request::create('/api/timeline', 'GET');
         $request->setUserResolver(fn () => $viewer);

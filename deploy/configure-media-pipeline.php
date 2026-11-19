@@ -15,10 +15,9 @@ if($currentVersion >= 3) {
 }
 $settings = [
     'R2_MEDIA_PIPELINE_VERSION' => '3',
-    // Enable adaptive HLS for new R2 post videos and expose it to signed-in viewers.
+    // Enable adaptive HLS for new R2 post videos and expose it to all viewers.
     // The MP4 remains the fallback if an encode or HLS playback fails.
     'MEDIA_REELS_HLS_ENABLED' => 'true',
-    'MEDIA_REELS_HLS_USER_IDS' => '*',
     // The direct R2 pipeline supports long originals without sending their
     // bytes through PHP or the VPS. Keep production aligned with the current
     // application policy (8 GiB and 60 minutes).

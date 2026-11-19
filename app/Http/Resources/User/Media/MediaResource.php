@@ -85,7 +85,7 @@ class MediaResource extends JsonResource
                 ]);
 
                 if (data_get($metadata, 'provider') === 'r2'
-                    && ! app(ReelsHlsRollout::class)->playbackEnabledFor($request->user())) {
+                    && ! app(ReelsHlsRollout::class)->processingEnabled()) {
                     if (is_array($metadata['playback'] ?? null)) {
                         unset($metadata['playback']['hls']);
                     }

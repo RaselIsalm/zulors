@@ -42,7 +42,6 @@ unavailable networks.
 
 ```env
 MEDIA_REELS_HLS_ENABLED=true
-MEDIA_REELS_HLS_USER_IDS=*
 MEDIA_REELS_HLS_TIMEOUT_SECONDS=21600
 MEDIA_REELS_HLS_STALE_AFTER_MINUTES=120
 ```
@@ -50,8 +49,7 @@ MEDIA_REELS_HLS_STALE_AFTER_MINUTES=120
 FFmpeg with `libx264` and AAC support must be available to the Horizon worker
 consuming `media-video-normal`. The production media pipeline configuration
 enables processing for newly published R2 post videos and exposes HLS to all
-authenticated viewers (`*`). A comma-separated user ID list can be used for a
-staged rollout in other environments. Turning the flag off immediately makes
+viewers. Turning the flag off immediately makes
 R2 playback use the MP4 again; Cloudflare Stream media keeps its existing
 playback path. Previously uploaded MP4s are not batch-transcoded by deploy;
 they remain playable and can be queued in bounded batches with
