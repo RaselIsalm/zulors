@@ -182,13 +182,18 @@ jobs:
               'active_test_accounts' => App\Models\User::active()->whereRaw('LOWER(email) LIKE ?', ['%.test'])->count(),
               'hls_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'background_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
+              'hls_background_pairs' => [],
               'current_encoding' => 0,
           ];
           foreach ($items as $item) {
               $metadata = $item->metadata ?? [];
+              $hlsState = data_get($metadata, 'playback.hls_state') ?: 'unset';
+              $backgroundState = data_get($metadata, 'background_processing_state') ?: 'unset';
+              $pair = $hlsState.'|'.$backgroundState;
+              $counts['hls_background_pairs'][$pair] = ($counts['hls_background_pairs'][$pair] ?? 0) + 1;
               foreach ([
-                  'hls_state' => data_get($metadata, 'playback.hls_state'),
-                  'background_state' => data_get($metadata, 'background_processing_state'),
+                  'hls_state' => $hlsState,
+                  'background_state' => $backgroundState,
               ] as $field => $value) {
                   $state = $value ?: 'unset';
                   $counts[$field][array_key_exists($state, $counts[$field]) ? $state : 'other']++;
