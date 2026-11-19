@@ -253,7 +253,7 @@ jobs:
               }
           }
           $recentVideoJobs = app(Laravel\Horizon\Contracts\JobRepository::class)->getRecent()
-              ->filter(fn ($job) => in_array((string) $job->queue, ['media-video', 'media-video-high'], true))
+              ->filter(fn ($job) => str_contains((string) $job->queue, 'media-video'))
               ->groupBy(fn ($job) => $job->name.'|'.$job->status)
               ->map(fn ($jobs) => $jobs->count())
               ->all();
