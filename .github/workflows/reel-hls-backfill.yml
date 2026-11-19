@@ -229,11 +229,21 @@ jobs:
                       ->filter(fn ($payload) => is_array($payload))
                       ->countBy(fn ($payload) => (string) data_get($payload, 'displayName', data_get($payload, 'job', 'unknown')))
                       ->all();
+                  $reservedPayloads = collect($redisQueue->getConnection()->zrange($redisQueue->getQueue($queueName).':reserved', 0, -1))
+                      ->map(fn ($payload) => json_decode((string) $payload, true))
+                      ->filter(fn ($payload) => is_array($payload))
+                      ->map(fn ($payload) => [
+                          'class' => (string) data_get($payload, 'displayName', data_get($payload, 'job', 'unknown')),
+                          'attempts' => (int) data_get($payload, 'attempts', 0),
+                      ])
+                      ->values()
+                      ->all();
                   $pendingByQueue[$queueName] = [
                       'ready' => (int) $redisQueue->pendingSize($queueName),
                       'delayed' => (int) $redisQueue->delayedSize($queueName),
                       'reserved' => (int) $redisQueue->reservedSize($queueName),
                       'recent_job_classes' => $payloads,
+                      'reserved_job_details' => $reservedPayloads,
                   ];
               }
           } catch (Throwable $exception) {
