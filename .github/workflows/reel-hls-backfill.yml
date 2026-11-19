@@ -252,6 +252,11 @@ jobs:
                   $processMetrics['oldest_ffmpeg_seconds'] = max($processMetrics['oldest_ffmpeg_seconds'], $elapsedSeconds($elapsed));
               }
           }
+          $recentVideoJobs = app(Laravel\Horizon\Contracts\JobRepository::class)->getRecent()
+              ->filter(fn ($job) => in_array((string) $job->queue, ['media-video', 'media-video-high'], true))
+              ->groupBy(fn ($job) => $job->name.'|'.$job->status)
+              ->map(fn ($jobs) => $jobs->count())
+              ->all();
           $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
           $supervisorDetails = collect(app(Laravel\Horizon\Contracts\SupervisorRepository::class)->all())
               ->map(fn ($supervisor) => [
@@ -272,6 +277,7 @@ jobs:
               'pending_by_queue' => $pendingByQueue,
               'horizon' => str_contains($horizonStatusOutput, 'running') ? 'running' : 'not_running',
               'supervisors' => $supervisorDetails,
+              'recent_video_jobs' => $recentVideoJobs,
           ] + $processMetrics;
           $counts['worker_scratch'] = $scratch;
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
