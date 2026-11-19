@@ -283,6 +283,7 @@ jobs:
           $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
           $processManagerStatus = [
               'supervisorctl' => trim((string) shell_exec('supervisorctl status 2>&1')),
+              'supervisorctl_sudo' => trim((string) shell_exec('sudo -n supervisorctl status 2>&1')),
               'supervisor_service' => trim((string) shell_exec('systemctl is-active supervisor 2>&1')),
               'supervisord_service' => trim((string) shell_exec('systemctl is-active supervisord 2>&1')),
           ];
