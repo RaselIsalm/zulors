@@ -253,6 +253,13 @@ jobs:
               }
           }
           $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
+          $supervisorDetails = collect(app(Laravel\Horizon\Contracts\SupervisorRepository::class)->all())
+              ->map(fn ($supervisor) => [
+                  'status' => $supervisor->status,
+                  'queue_processes' => (array) $supervisor->processes,
+              ])
+              ->values()
+              ->all();
           $sourceFiles = glob(storage_path('app/tmp/reel-hls/*/source.*')) ?: [];
           $scratch = ['source_files' => count($sourceFiles), 'source_bytes' => 0, 'largest_source_bytes' => 0, 'free_disk_bytes' => (int) (disk_free_space(storage_path()) ?: 0)];
           foreach ($sourceFiles as $sourceFile) {
@@ -264,6 +271,7 @@ jobs:
               'connection' => $queueConnection,
               'pending_by_queue' => $pendingByQueue,
               'horizon' => str_contains($horizonStatusOutput, 'running') ? 'running' : 'not_running',
+              'supervisors' => $supervisorDetails,
           ] + $processMetrics;
           $counts['worker_scratch'] = $scratch;
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
