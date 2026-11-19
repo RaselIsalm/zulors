@@ -281,6 +281,11 @@ jobs:
               ->map(fn ($jobs) => $jobs->count())
               ->all();
           $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
+          $processManagerStatus = [
+              'supervisorctl' => trim((string) shell_exec('supervisorctl status 2>&1')),
+              'supervisor_service' => trim((string) shell_exec('systemctl is-active supervisor 2>&1')),
+              'supervisord_service' => trim((string) shell_exec('systemctl is-active supervisord 2>&1')),
+          ];
           $supervisorDetails = collect(app(Laravel\Horizon\Contracts\SupervisorRepository::class)->all())
               ->map(fn ($supervisor) => [
                   'status' => $supervisor->status,
@@ -317,6 +322,8 @@ jobs:
               'connection' => $queueConnection,
               'pending_by_queue' => $pendingByQueue,
               'horizon' => str_contains($horizonStatusOutput, 'running') ? 'running' : 'not_running',
+              'horizon_status' => substr($horizonStatusOutput, 0, 300),
+              'process_manager' => $processManagerStatus,
               'supervisors' => $supervisorDetails,
               'recent_video_jobs' => $recentVideoJobs,
           ] + $processMetrics;
