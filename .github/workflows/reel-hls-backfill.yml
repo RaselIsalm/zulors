@@ -248,7 +248,7 @@ jobs:
 
               return ((int) $days * 86400) + $seconds;
           };
-          $processMetrics = ['video_worker_processes' => 0, 'oldest_video_worker_seconds' => 0, 'ffmpeg_processes' => 0, 'max_ffmpeg_cpu_percent' => 0.0, 'oldest_ffmpeg_seconds' => 0];
+          $processMetrics = ['video_worker_processes' => 0, 'oldest_video_worker_seconds' => 0, 'max_video_worker_cpu_percent' => 0.0, 'ffmpeg_processes' => 0, 'ffprobe_processes' => 0, 'max_ffmpeg_cpu_percent' => 0.0, 'oldest_ffmpeg_seconds' => 0];
           foreach (preg_split('/\\R/', trim($processList)) ?: [] as $processLine) {
               $parts = preg_split('/\\s+/', trim($processLine), 4);
               if (count($parts) < 4) continue;
@@ -256,12 +256,14 @@ jobs:
               if (preg_match('/(?:^|\\s)artisan\\s+(?:horizon:work|queue:work)\\b/', $command) && str_contains($command, 'media-video')) {
                   $processMetrics['video_worker_processes']++;
                   $processMetrics['oldest_video_worker_seconds'] = max($processMetrics['oldest_video_worker_seconds'], $elapsedSeconds($elapsed));
+                  $processMetrics['max_video_worker_cpu_percent'] = max($processMetrics['max_video_worker_cpu_percent'], (float) $cpu);
               }
               if (preg_match('/(?:^|\\s)(?:\\S*\\/)?ffmpeg(?:\\s|$)/', $command)) {
                   $processMetrics['ffmpeg_processes']++;
                   $processMetrics['max_ffmpeg_cpu_percent'] = max($processMetrics['max_ffmpeg_cpu_percent'], (float) $cpu);
                   $processMetrics['oldest_ffmpeg_seconds'] = max($processMetrics['oldest_ffmpeg_seconds'], $elapsedSeconds($elapsed));
               }
+              if (preg_match('/(?:^|\\s)(?:\\S*\\/)?ffprobe(?:\\s|$)/', $command)) $processMetrics['ffprobe_processes']++;
           }
           $recentVideoJobs = app(Laravel\Horizon\Contracts\JobRepository::class)->getRecent()
               ->filter(fn ($job) => str_contains((string) $job->queue, 'media-video'))
