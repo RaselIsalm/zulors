@@ -30,23 +30,25 @@
                     </template>
                     <FeedUpdate v-if="timelineNewPosts.length" v-bind:posts="timelineNewPosts" v-on:click="applyTimelineUpdate"></FeedUpdate>
                     <div v-if="timelinePosts.length">
-                        <template v-for="(postData, index) in timelinePosts" v-bind:key="postData.type === 'ad' ? postData.id : postData.hash_id">
-                            <NativeSponsoredPost
-                                v-if="postData.type === 'ad'"
-                                v-bind:adData="postData.ad"
-                                v-on:hide="timelineStore.removePost(postData.id)"
-                            ></NativeSponsoredPost>
-                            <TimelinePublication
-                                v-else
-                                v-bind:postData="postData"
-                                v-bind:feedSessionId="timelineFeedSessionId"
-                                v-bind:feedType="timelineFeedType"
-                                v-bind:position="index + 1"
-                                v-bind:refreshReason="timelineRefreshReason"
-                                source="home"
-                                v-on:delete="handlePostDelete(postData)"
-                            ></TimelinePublication>
-                        </template>
+                        <VirtualizedPostList class="block" v-bind:items="timelinePosts" v-bind:getKey="getTimelinePostKey" v-bind:estimatedItemHeight="760">
+                            <template v-slot:default="{ item: postData, index }">
+                                <NativeSponsoredPost
+                                    v-if="postData.type === 'ad'"
+                                    v-bind:adData="postData.ad"
+                                    v-on:hide="timelineStore.removePost(postData.id)"
+                                ></NativeSponsoredPost>
+                                <TimelinePublication
+                                    v-else
+                                    v-bind:postData="postData"
+                                    v-bind:feedSessionId="timelineFeedSessionId"
+                                    v-bind:feedType="timelineFeedType"
+                                    v-bind:position="index + 1"
+                                    v-bind:refreshReason="timelineRefreshReason"
+                                    source="home"
+                                    v-on:delete="handlePostDelete(postData)"
+                                ></TimelinePublication>
+                            </template>
+                        </VirtualizedPostList>
 
                         <div v-if="state.isLoadingContent">
                             <div class="flex justify-center my-4">
@@ -92,6 +94,7 @@
     import PublicationOutbox from '@/kernel/vue/components/media/publications/PublicationOutbox.vue';
     import TimelinePublication from '@D/components/timeline/feed/TimelinePublication.vue';
     import TimelinePublicationSkeleton from '@D/components/timeline/feed/TimelinePublicationSkeleton.vue';
+    import VirtualizedPostList from '@/kernel/vue/components/lists/VirtualizedPostList.vue';
     import PublicationEditorTrigger from '@D/features/home/parts/PublicationEditorTrigger.vue';
 
     import TimelineContainer from '@D/components/layout/TimelineContainer.vue';
@@ -145,6 +148,10 @@
             const timelinePosts = computed(() => {
                 return timelineStore.posts;
             });
+
+            const getTimelinePostKey = (postData, index) => postData?.type === 'ad'
+                ? `ad:${postData.id}`
+                : (postData?.hash_id || postData?.id || index);
 
             const timelineFeedSessionId = computed(() => {
                 return timelineStore.feedSessionId;
@@ -338,6 +345,7 @@
                     useStoriesStore().fetchStoriesFeed().catch(() => {});
                 },
                 timelinePosts: timelinePosts,
+                getTimelinePostKey: getTimelinePostKey,
                 timelineStore: timelineStore,
                 timelineFeedSessionId: timelineFeedSessionId,
                 timelineFeedType: timelineFeedType,
@@ -358,6 +366,7 @@
             StoriesFeed: StoriesFeed,
             TimelinePublication: TimelinePublication,
             TimelinePublicationSkeleton: TimelinePublicationSkeleton,
+            VirtualizedPostList: VirtualizedPostList,
             PublicationEditorTrigger: PublicationEditorTrigger,
             TimelineContainer: TimelineContainer,
             FollowRecommendationList: FollowRecommendationList,

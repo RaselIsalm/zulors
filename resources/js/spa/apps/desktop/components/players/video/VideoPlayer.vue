@@ -8,7 +8,7 @@
 			v-bind:class="{ 'relative z-10': sponsoredFeed }"
 			ref="videoPlayerRef"
 			v-bind:poster="thumbnailUrl"
-			preload="none"
+			preload="metadata"
 			playsinline
 			muted
 			loop="loop"

@@ -6,11 +6,14 @@
 	</template>
 	<template v-else>
 		<template v-if="profilePosts.length"> 
-			<TimelinePublication 
-				v-for="postData in profilePosts"
-				v-bind:postData="postData"
-				v-on:delete="handleDeletePost(postData)"
-			v-bind:key="postData.hash_id"></TimelinePublication>
+			<VirtualizedPostList class="block" v-bind:items="profilePosts" v-bind:getKey="getProfilePostKey" v-bind:estimatedItemHeight="640">
+				<template v-slot:default="{ item: postData }">
+					<TimelinePublication
+						v-bind:postData="postData"
+						v-on:delete="handleDeletePost(postData)"
+					></TimelinePublication>
+				</template>
+			</VirtualizedPostList>
 
 			<div v-if="state.isLoadingContent">
 				<div class="flex justify-center my-4">
@@ -39,6 +42,7 @@
 	import TimelinePublicationSkeleton from '@M/components/timeline/feed/TimelinePublicationSkeleton.vue';
 	import TimelinePublication from '@M/components/timeline/feed/TimelinePublication.vue';
     import TimelineEmptyState from '@M/components/timeline/state/TimelineEmptyState.vue';
+	import VirtualizedPostList from '@/kernel/vue/components/lists/VirtualizedPostList.vue';
 
 	export default defineComponent({
 		props: {
@@ -50,6 +54,7 @@
 		setup(props) {
 			const profileData = inject('profileData');
 			const profilePosts = ref([]);
+			const getProfilePostKey = (postData, index) => postData?.hash_id || postData?.id || index;
 			const { postDeleter } = useDeletePost();
 			let realtimeChannel = null;
 			
@@ -189,11 +194,13 @@
 				return {
 				state: state,
 				profilePosts: profilePosts,
+				getProfilePostKey: getProfilePostKey,
 				handleDeletePost: handleDeletePost
 			};
 		},
 		components: {
             TimelinePublication: TimelinePublication,
+			VirtualizedPostList: VirtualizedPostList,
 			TimelinePublicationSkeleton: TimelinePublicationSkeleton,
             TimelineEmptyState: TimelineEmptyState,
 		}

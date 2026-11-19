@@ -27,15 +27,22 @@ creates and deletes a no-store probe object while checking preflight, playlist
 reads, HEAD requests, byte ranges, and exposed `Content-Range` headers. Live
 deployments run this check before promoting a release.
 
-Feed cards render the thumbnail first. The video player attaches playback near
-the viewport. HLS.js warms only the next Reel, starts at the lowest rendition,
-and stops after about 3.5 seconds are buffered. It does not prewarm offline or
-when Data Saver is enabled. Active playback can adapt through the full ladder;
-off-screen players pause and release their buffered source, and the feed
-playback arbiter allows one visible video to play at a time. Native playback
-uses browser-controlled metadata preloading. This reduces the next-slide wait
-on supported HLS.js clients, but cannot guarantee zero startup delay on slow or
-unavailable networks.
+Feed cards render the thumbnail first and mount players within 500 pixels of
+the viewport. Feed and Reel lookahead ask the service worker to cache the
+current and next HLS master, first variant playlist, and first segment in its
+bounded media cache. It skips network prefetch while offline or using Data
+Saver; direct MP4 sources are never downloaded in full just to warm the cache.
+Native playback uses metadata preloading. Reels keep the next rendition and
+buffer bounded. Active playback can adapt through the full ladder; off-screen
+players pause and release their buffered source, and the feed playback arbiter
+allows one visible video to play at a time. These changes shorten startup when
+the prefetched response is available, but cannot guarantee zero delay on slow
+or unavailable networks.
+
+Home feeds and profile timelines window their rendered post cards after 30
+items. Measured card heights maintain scroll spacers while only the viewport
+and three nearby cards on either side stay mounted. The complete paginated
+post data remains in the timeline store.
 
 ## Rollout controls
 

@@ -345,10 +345,10 @@ for(const platform of Object.keys(previewPaths)) {
 }
 
 for(const platform of Object.keys(feedVideoPlayerPaths)) {
-    test(`${platform}: published feed player does not bind a video source eagerly`, async () => {
+    test(`${platform}: feed player allows metadata preloading without a template source binding`, async () => {
         const source = (await readFile(new URL(`../../${feedVideoPlayerPaths[platform]}`, import.meta.url))).toString();
         const template = parse(source).descriptor.template.content;
-        assert.match(template, /<video[\s\S]*?preload="none"/);
+        assert.match(template, /<video[\s\S]*?preload="metadata"/);
         assert.doesNotMatch(template, /<video[\s\S]*?v-bind:src=/);
         assert.match(source, /createAdaptiveVideoPlaybackController/);
         assert.doesNotMatch(template, /<source[^>]+type="video\/mp4"/);

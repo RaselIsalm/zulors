@@ -13,25 +13,26 @@
 			<div class="pb-6">
 	            <FeedUpdate v-if="timelineNewPosts.length" v-bind:posts="timelineNewPosts" v-on:click="applyTimelineUpdate"></FeedUpdate>
 				<div v-if="timelinePosts.length">
-                    <template v-for="(postData, index) in timelinePosts" v-bind:key="postData.type === 'ad' ? postData.id : postData.hash_id">
-                        <NativeSponsoredPost v-if="postData.type === 'ad'" v-bind:adData="postData.ad"
-                                v-on:hide="timelineStore.removePost(postData.id)"></NativeSponsoredPost>
-	                    <TimelinePublication
-                            v-else
-	                        v-bind:postData="postData"
-	                        v-bind:feedSessionId="timelineFeedSessionId"
-	                        v-bind:feedType="timelineFeedType"
-	                        v-bind:position="index + 1"
-	                        v-bind:refreshReason="timelineRefreshReason"
-	                        source="home"
-	                    v-on:delete="handlePostDelete(postData)"></TimelinePublication>
-	                    
-	                    <!-- Show follow recommendation every 10 posts -->
-	                    <template v-if="(index + 1) % 35 === 0">
-	                        <FollowRecommendation v-bind:key="index"></FollowRecommendation>
-	                    </template>
-
-	                </template>
+					<VirtualizedPostList class="block" v-bind:items="timelinePosts" v-bind:getKey="getTimelinePostKey" v-bind:estimatedItemHeight="640">
+						<template v-slot:default="{ item: postData, index }">
+							<NativeSponsoredPost
+								v-if="postData.type === 'ad'"
+								v-bind:adData="postData.ad"
+								v-on:hide="timelineStore.removePost(postData.id)"
+							></NativeSponsoredPost>
+							<TimelinePublication
+								v-else
+								v-bind:postData="postData"
+								v-bind:feedSessionId="timelineFeedSessionId"
+								v-bind:feedType="timelineFeedType"
+								v-bind:position="index + 1"
+								v-bind:refreshReason="timelineRefreshReason"
+								source="home"
+								v-on:delete="handlePostDelete(postData)"
+							></TimelinePublication>
+							<FollowRecommendation v-if="(index + 1) % 35 === 0" v-bind:key="`follow-${index}`"></FollowRecommendation>
+						</template>
+					</VirtualizedPostList>
 
 					<div v-if="state.isLoadingContent">
 						<div class="flex justify-center my-4">
@@ -68,6 +69,7 @@
     import TimelinePublication from '@M/components/timeline/feed/TimelinePublication.vue';
     import TimelinePublicationSkeleton from '@M/components/timeline/feed/TimelinePublicationSkeleton.vue';
     import TimelineContainer from '@M/components/timeline/feed/TimelineContainer.vue';
+    import VirtualizedPostList from '@/kernel/vue/components/lists/VirtualizedPostList.vue';
     import StoriesFeed from '@M/components/stories/feed/StoriesFeed.vue';
     import { useStoriesStore } from '@M/store/stories/stories.store.js';
     import PublicationOutbox from '@/kernel/vue/components/media/publications/PublicationOutbox.vue';
@@ -120,6 +122,10 @@
             const timelinePosts = computed(() => {
                 return timelineStore.posts;
             });
+
+            const getTimelinePostKey = (postData, index) => postData?.type === 'ad'
+                ? `ad:${postData.id}`
+                : (postData?.hash_id || postData?.id || index);
 
             const timelineFeedSessionId = computed(() => {
                 return timelineStore.feedSessionId;
@@ -310,6 +316,7 @@
                 },
                 swipeSurfaceRef: swipeSurfaceRef,
                 timelinePosts: timelinePosts,
+                getTimelinePostKey: getTimelinePostKey,
                 timelineStore: timelineStore,
                 timelineFeedSessionId: timelineFeedSessionId,
                 timelineFeedType: timelineFeedType,
@@ -331,6 +338,7 @@
             TimelinePublication: TimelinePublication,
             TimelinePublicationSkeleton: TimelinePublicationSkeleton,
             TimelineContainer: TimelineContainer,
+            VirtualizedPostList: VirtualizedPostList,
             StoriesFeed: StoriesFeed,
             NativeSponsoredPost: NativeSponsoredPost,
             FollowRecommendation: FollowRecommendation,

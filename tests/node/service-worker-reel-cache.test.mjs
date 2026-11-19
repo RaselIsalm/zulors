@@ -63,10 +63,10 @@ function createWorkerHarness() {
         return response;
     }
 
-    async function updateWindow(current = [], next = []) {
+    async function updateWindow(current = [], next = [], prefetch = true) {
         let completion = Promise.resolve();
         listeners.get('message')({
-            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next },
+            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch },
             waitUntil(value) { completion = value; },
         });
         await completion;
@@ -130,4 +130,53 @@ test('a prioritized HLS master passes priority to its variant playlist and first
     assert.equal(meta.entries[masterUrl]?.priority, 3);
     assert.equal(meta.entries[variantUrl]?.priority, 3);
     assert.equal(meta.entries[segmentUrl]?.priority, 3);
+});
+
+test('a playback cache window fetches the current and next HLS manifest, variant, and first segment', async () => {
+    const worker = createWorkerHarness();
+    const playback = [
+        {
+            master: `${worker.origin}/current/master.m3u8`,
+            variant: `${worker.origin}/current/360/index.m3u8`,
+            segment: `${worker.origin}/current/360/segment.ts`,
+        },
+        {
+            master: `${worker.origin}/next/master.m3u8`,
+            variant: `${worker.origin}/next/360/index.m3u8`,
+            segment: `${worker.origin}/next/360/segment.ts`,
+        },
+    ];
+
+    playback.forEach(({ master, variant }) => {
+        worker.responses.set(master, () => new Response('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360\n360/index.m3u8\n', {
+            headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+        }));
+        worker.responses.set(variant, () => new Response('#EXTM3U\n#EXTINF:4.0,\nsegment.ts\n#EXT-X-ENDLIST\n', {
+            headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+        }));
+    });
+
+    await worker.updateWindow([playback[0].master], [playback[1].master]);
+
+    const requestedUrls = worker.requests.map((request) => request.url);
+    const meta = await worker.mediaMeta();
+
+    for (const [index, item] of playback.entries()) {
+        for (const url of [item.master, item.variant, item.segment]) {
+            assert.ok(requestedUrls.includes(url), `expected prefetch request for ${url}`);
+        }
+        const expectedPriority = index === 0 ? 3 : 2;
+        assert.equal(meta.entries[item.master]?.priority, expectedPriority);
+        assert.equal(meta.entries[item.variant]?.priority, expectedPriority);
+        assert.equal(meta.entries[item.segment]?.priority, expectedPriority);
+    }
+});
+
+test('a cache window can update priorities without network prefetch', async () => {
+    const worker = createWorkerHarness();
+    const masterUrl = `${worker.origin}/media/master.m3u8`;
+
+    await worker.updateWindow([masterUrl], [], false);
+
+    assert.deepEqual(worker.requests, []);
 });

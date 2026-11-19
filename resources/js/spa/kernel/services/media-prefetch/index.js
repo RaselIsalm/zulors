@@ -2,7 +2,7 @@ import { buildAdaptiveVideoSource } from '@/kernel/services/media/adaptive-video
 import { getNetworkProfileSnapshot, isSlowNetworkProfile } from '@/kernel/services/network/index.js';
 
 const prefetchedUrls = new Map();
-let queuedPosts = [];
+let queuedPosts = new Map();
 let queuedLimit = 0;
 let prefetchHandle = null;
 
@@ -13,6 +13,10 @@ function canPrefetch() {
 function prefetchImage(url) {
     if(! url || prefetchedUrls.has(url) || ! canPrefetch()) {
         return;
+    }
+
+    if(prefetchedUrls.size >= 400) {
+        prefetchedUrls.delete(prefetchedUrls.keys().next().value);
     }
 
     prefetchedUrls.set(url, 1);
@@ -46,6 +50,65 @@ function prefetchPostMedia(postData, state) {
 	}
 }
 
+function collectHlsPlaybackUrls(posts = [], limit = 2) {
+    const urls = [];
+
+    const visitPost = (postData) => {
+        if(! postData || urls.length >= limit) {
+            return;
+        }
+
+        const mediaItems = postData?.relations?.media || [];
+
+        for(const mediaItem of mediaItems) {
+            if(mediaItem?.type !== 'video') {
+                continue;
+            }
+
+            const source = buildAdaptiveVideoSource(mediaItem);
+
+            if(source.transport === 'hls' && source.url && !urls.includes(source.url)) {
+                urls.push(source.url);
+            }
+
+            if(urls.length >= limit) {
+                return;
+            }
+        }
+
+        visitPost(postData?.relations?.quoted_post);
+    };
+
+    posts.forEach(visitPost);
+
+    return urls;
+}
+
+function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}) {
+    const serviceWorker = typeof navigator !== 'undefined' ? navigator.serviceWorker : null;
+
+    if(! serviceWorker) {
+        return;
+    }
+
+    const message = {
+        type: 'ZULORS_REELS_CACHE_WINDOW',
+        current,
+        next,
+        prefetch: !networkProfile.offline && !networkProfile.saveData
+    };
+    const worker = serviceWorker.controller;
+
+    if(worker) {
+        worker.postMessage(message);
+        return;
+    }
+
+    serviceWorker.ready?.then((registration) => {
+        registration.active?.postMessage(message);
+    }).catch(() => {});
+}
+
 function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
     if(! canPrefetch() || ! Array.isArray(posts)) {
         return;
@@ -64,22 +127,33 @@ function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
 		? Math.max(effectiveLimit * 2, effectiveLimit)
 		: Math.max(effectiveLimit * 3, effectiveLimit);
 
-	queuedPosts = queuedPosts.concat(posts.slice(0, queueLimit));
+    posts.slice(0, queueLimit).forEach((postData, index) => {
+        const key = postData?.hash_id || postData?.id || postData || index;
+
+        if(queuedPosts.size < 60 && !queuedPosts.has(key)) {
+            queuedPosts.set(key, postData);
+        }
+    });
 	queuedLimit = Math.max(queuedLimit, effectiveLimit);
 
 	const runPrefetch = () => {
 		prefetchHandle = null;
 
 		if(document.visibilityState === 'hidden') {
-			queuedPosts = [];
+			queuedPosts = new Map();
 			queuedLimit = 0;
 
 			return;
 		}
 
-		const postsBatch = queuedPosts.splice(0);
+		const postsBatch = Array.from(queuedPosts.values());
+		queuedPosts = new Map();
 		const limitBatch = queuedLimit || effectiveLimit;
 		queuedLimit = 0;
+
+        if(! postsBatch.length) {
+            return;
+        }
 
 		const state = {
 			count: 0,
@@ -91,6 +165,9 @@ function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
 
 			return state.count >= state.limit;
 		});
+
+        const playbackUrls = collectHlsPlaybackUrls(postsBatch, 2);
+        publishPlaybackCacheWindow(playbackUrls.slice(0, 1), playbackUrls.slice(1, 2), networkProfile);
 	};
 
     if(options.immediate) {
@@ -137,15 +214,8 @@ function prefetchReelsPlaybackWindow(posts = [], activeIndex = 0) {
 
     const currentUrls = collectPostCacheUrls(activePost);
     const nextUrls = collectPostCacheUrls(nextPost);
-    const worker = navigator.serviceWorker?.controller;
 
-    if(worker) {
-        worker.postMessage({
-            type: 'ZULORS_REELS_CACHE_WINDOW',
-            current: currentUrls,
-            next: nextUrls
-        });
-    }
+    publishPlaybackCacheWindow(currentUrls, nextUrls, networkProfile);
 }
 
 function warmHomeFeedMedia(posts = [], options = {}) {
@@ -161,10 +231,8 @@ function warmHomeFeedMedia(posts = [], options = {}) {
 
     prefetchTimelineMedia(posts, limit, {
         immediate: true,
-        videoPreload: 'metadata',
-        includeFallbackSource: false,
         ...options
     });
 }
 
-export { prefetchTimelineMedia, prefetchReelsPlaybackWindow, warmHomeFeedMedia };
+export { prefetchTimelineMedia, prefetchReelsPlaybackWindow, warmHomeFeedMedia, collectHlsPlaybackUrls };

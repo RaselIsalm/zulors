@@ -368,6 +368,126 @@ const canCacheMediaResponse = (request, response) => {
     return ! contentLength || contentLength <= mediaCacheMaxSingleBytes;
 };
 
+const mediaPrefetchPromises = new Map();
+
+const cacheMediaResource = async (url, priority) => {
+    const normalizedUrl = normalizeCachePriorityUrl(url);
+
+    if(! normalizedUrl) {
+        return null;
+    }
+
+    const pending = mediaPrefetchPromises.get(normalizedUrl);
+    if(pending) {
+        return pending;
+    }
+
+    const prefetchPromise = (async () => {
+        const request = new Request(normalizedUrl, {
+            mode: 'cors',
+            credentials: 'omit',
+        });
+        const cache = await caches.open(mediaCacheName);
+        const cachedResponse = await cache.match(request);
+
+        if(cachedResponse) {
+            await rememberHlsDescendantPriorities(normalizedUrl, cachedResponse, priority);
+            await rememberMediaMeta(cache, request, cachedResponse.clone());
+
+            return cachedResponse;
+        }
+
+        const response = await fetch(request);
+        await rememberHlsDescendantPriorities(normalizedUrl, response, priority);
+
+        if(canCacheMediaResponse(request, response)) {
+            await cache.put(request, response.clone());
+            await rememberMediaMeta(cache, request, response.clone());
+        }
+
+        return response;
+    })().catch(() => null).finally(() => {
+        mediaPrefetchPromises.delete(normalizedUrl);
+    });
+
+    mediaPrefetchPromises.set(normalizedUrl, prefetchPromise);
+
+    return prefetchPromise;
+};
+
+const prefetchHlsPlayback = async (url, priority) => {
+    const masterResponse = await cacheMediaResource(url, priority);
+
+    if(! masterResponse?.ok) {
+        return;
+    }
+
+    try {
+        const masterText = await masterResponse.clone().text();
+        const lines = masterText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        let expectVariant = false;
+        let variantUrl = null;
+
+        for(const line of lines) {
+            if(line.startsWith('#EXT-X-STREAM-INF')) {
+                expectVariant = true;
+                continue;
+            }
+
+            if(line.startsWith('#')) {
+                continue;
+            }
+
+            if(expectVariant) {
+                variantUrl = normalizeCachePriorityUrl(new URL(line, url).href);
+                break;
+            }
+        }
+
+        if(! variantUrl) {
+            const firstSegment = lines.find((line) => !line.startsWith('#'));
+            const segmentUrl = firstSegment ? normalizeCachePriorityUrl(new URL(firstSegment, url).href) : null;
+
+            if(segmentUrl && !/\.m3u8(?:$|\?)/i.test(segmentUrl)) {
+                hlsDescendantPriorityUrls.set(segmentUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(segmentUrl) || 0)));
+                await cacheMediaResource(segmentUrl, priority);
+            }
+
+            return;
+        }
+
+        hlsDescendantPriorityUrls.set(variantUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(variantUrl) || 0)));
+        const variantResponse = await cacheMediaResource(variantUrl, priority);
+
+        if(! variantResponse?.ok) {
+            return;
+        }
+
+        const variantText = await variantResponse.clone().text();
+        const firstSegment = variantText.split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#'));
+        const segmentUrl = firstSegment ? normalizeCachePriorityUrl(new URL(firstSegment, variantUrl).href) : null;
+
+        if(segmentUrl && !/\.m3u8(?:$|\?)/i.test(segmentUrl)) {
+            hlsDescendantPriorityUrls.set(segmentUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(segmentUrl) || 0)));
+            await cacheMediaResource(segmentUrl, priority);
+        }
+    }
+    catch (error) {
+        // Playback will still fetch the playlist and segments on demand.
+    }
+};
+
+const prefetchHlsWindow = async (current = [], next = []) => {
+    const orderedUrls = [
+        ...current.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 3]),
+        ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 2]),
+    ];
+
+    for(const [url, priority] of orderedUrls) {
+        await prefetchHlsPlayback(url, priority);
+    }
+};
+
 const mediaStaleWhileRevalidate = async (request) => {
     // A cached full response must never replace a byte-range response expected by the video element.
     if(request.headers.has('range')) {
@@ -436,14 +556,19 @@ self.addEventListener('message', (event) => {
         reelCachePriorityUrls = nextPriorities;
         hlsDescendantPriorityUrls = new Map();
 
-        event.waitUntil?.(caches.open(mediaCacheName).then(async (cache) => {
+        const updatePriorities = caches.open(mediaCacheName).then(async (cache) => {
             const meta = await readMediaMeta(cache);
             Object.entries(meta.entries || {}).forEach(([url, entry]) => {
                 entry.priority = mediaPriorityForUrl(url);
             });
             await writeMediaMeta(cache, meta);
             await pruneMediaCache(cache, meta);
-        }));
+        });
+        const prefetchPlayback = event.data?.prefetch === false
+            ? Promise.resolve()
+            : prefetchHlsWindow(event.data?.current, event.data?.next);
+
+        event.waitUntil?.(Promise.all([updatePriorities, prefetchPlayback]));
     }
 });
 

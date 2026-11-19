@@ -22,7 +22,7 @@ for(const platform of Object.values(platforms)) {
         assert.match(publication.script.content, /thumbnail_url \|\| mediaItem\.value\.lqip_base64/);
         assert.match(publication.template.content, /v-if="isNearViewport"/);
         assert.match(publication.script.content, /rootMargin: '500px 0px'/);
-        assert.match(player.template.content, /preload="none"/);
+        assert.match(player.template.content, /preload="metadata"/);
         assert.doesNotMatch(player.template.content, /<video[^>]+(?:src|v-bind:src)=/);
         assert.match(player.script.content, /createAdaptiveVideoPlaybackController/);
     });
@@ -37,10 +37,12 @@ for(const platform of Object.values(platforms)) {
     });
 }
 
-test('timeline media prefetch does not create video elements or request video sources', async () => {
+test('timeline prefetch keeps image lookahead and warms one bounded HLS playback window', async () => {
     const source = (await readFile(new URL('../../resources/js/spa/kernel/services/media-prefetch/index.js', import.meta.url))).toString();
 
     assert.doesNotMatch(source, /createElement\(['"]video['"]\)/);
-    assert.doesNotMatch(source, /prefetchVideoSource/);
     assert.match(source, /prefetchImage\(mediaItem\.thumbnail_url\)/);
+    assert.match(source, /collectHlsPlaybackUrls\(postsBatch, 2\)/);
+    assert.match(source, /type: 'ZULORS_REELS_CACHE_WINDOW'/);
+    assert.match(source, /prefetch: !networkProfile\.offline && !networkProfile\.saveData/);
 });

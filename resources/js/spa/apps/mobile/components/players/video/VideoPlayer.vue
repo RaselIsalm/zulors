@@ -9,7 +9,7 @@
 			ref="videoPlayerRef"
 			webkit-playsinline
 			playsinline
-			preload="none"
+			preload="metadata"
 			muted
 			v-bind:poster="thumbnailUrl"
 			loop="loop"
