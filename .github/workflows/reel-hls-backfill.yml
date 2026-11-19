@@ -13,6 +13,7 @@ on:
           - edge-smoke
           - auth-smoke
           - access-audit
+          - worker-audit
       limit:
         description: Maximum videos to queue (1–200; the current legacy batch is 15).
         required: true
@@ -48,7 +49,7 @@ jobs:
       - name: Check operation and deploy secrets
         run: |
           test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
-          case "$OPERATION" in backfill|status|edge-smoke|auth-smoke|access-audit) ;; *) exit 1 ;; esac
+          case "$OPERATION" in backfill|status|edge-smoke|auth-smoke|access-audit|worker-audit) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
@@ -77,6 +78,32 @@ jobs:
             if [[ "$(id -u)" == 0 ]]; then echo 'root=yes'; else echo 'root=no'; fi
             if sudo -n true >/dev/null 2>&1; then echo 'passwordless_sudo=yes'; else echo 'passwordless_sudo=no'; fi
             if [[ -w "$live_path" ]]; then echo 'deploy_path_writable=yes'; else echo 'deploy_path_writable=no'; fi
+            exit
+          fi
+
+          if [[ "$operation" == "worker-audit" ]]; then
+            echo '--- queue processes (pid ppid user elapsed state command) ---'
+            ps -eo pid=,ppid=,user=,etime=,stat=,comm=,args= \
+              | awk '$0 ~ /artisan (horizon|queue:work)/ && $0 !~ /awk/ {print}'
+            echo '--- Horizon status ---'
+            if php artisan horizon:status --no-ansi 2>&1; then
+              true
+            else
+              echo 'horizon_status_command=inactive_or_unavailable'
+            fi
+            echo '--- Supervisor configuration filenames ---'
+            for config_dir in /etc/supervisor/conf.d /etc/supervisord.d; do
+              if [[ -d "$config_dir" ]]; then
+                find "$config_dir" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort
+              fi
+            done
+            echo '--- service state ---'
+            for service in supervisor supervisord; do
+              if command -v systemctl >/dev/null 2>&1; then
+                printf '%s=' "$service"
+                systemctl is-active "$service" 2>/dev/null || true
+              fi
+            done
             exit
           fi
 
