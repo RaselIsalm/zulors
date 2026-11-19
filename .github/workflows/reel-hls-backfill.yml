@@ -1,0 +1,99 @@
+name: Reel HLS Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Backfill missing HLS encodes or inspect aggregate status.
+        required: true
+        type: choice
+        options:
+          - backfill
+          - status
+      limit:
+        description: Maximum videos to queue (1–200; the current legacy batch is 15).
+        required: true
+        default: 15
+        type: number
+      confirm:
+        description: Enter BACKFILL_LIVE_REEL_HLS to run this production operation.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zulors-live-reel-hls-operation
+  cancel-in-progress: false
+
+jobs:
+  operate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    env:
+      LIVE_HOST: ${{ secrets.LIVE_HOST }}
+      LIVE_USER: ${{ secrets.LIVE_USER }}
+      LIVE_PORT: ${{ secrets.LIVE_PORT || '22' }}
+      LIVE_PATH: ${{ secrets.LIVE_PATH }}
+      LIVE_SSH_PRIVATE_KEY: ${{ secrets.LIVE_SSH_PRIVATE_KEY }}
+      OPERATION: ${{ inputs.operation }}
+      LIMIT: ${{ inputs.limit }}
+      CONFIRMATION: ${{ inputs.confirm }}
+
+    steps:
+      - name: Check operation and deploy secrets
+        run: |
+          test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
+          case "$OPERATION" in backfill|status) ;; *) exit 1 ;; esac
+          [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
+          test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
+
+      - name: Install live deploy key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$LIVE_SSH_PRIVATE_KEY" > ~/.ssh/zulors_live_deploy
+          chmod 600 ~/.ssh/zulors_live_deploy
+
+      - name: Run bounded HLS operation on live
+        run: |
+          ssh -i ~/.ssh/zulors_live_deploy -p "$LIVE_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 "$LIVE_USER@$LIVE_HOST" \
+            "bash -s -- '$LIVE_PATH' '$OPERATION' '$LIMIT'" <<'REMOTE'
+          set -euo pipefail
+          live_path="$1"
+          operation="$2"
+          limit="$3"
+          cd "$live_path"
+
+          if [[ "$operation" == "backfill" ]]; then
+            php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
+            exit
+          fi
+
+          php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+          $app = require 'bootstrap/app.php';
+          $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+          $items = App\Models\Media::query()
+              ->where('type', App\Enums\Media\MediaType::VIDEO->value)
+              ->where('status', App\Enums\Media\MediaStatus::PROCESSED->value)
+              ->where('mediaable_type', App\Models\Post::class)
+              ->where('metadata->provider', 'r2')
+              ->get(['metadata']);
+          $counts = ['total' => $items->count(), 'hls_ready' => 0, 'hls_unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'current_encoding' => 0];
+          foreach ($items as $item) {
+              $metadata = $item->metadata ?? [];
+              $state = data_get($metadata, 'playback.hls_state');
+              if ($state === 'ready') $counts['hls_ready']++;
+              elseif (! $state) $counts['hls_unset']++;
+              foreach (['queued', 'processing', 'failed'] as $candidate) {
+                  if (data_get($metadata, 'background_processing_state') === $candidate || $state === $candidate) $counts[$candidate]++;
+              }
+              if (data_get($metadata, 'playback.encoding_version') === App\Jobs\User\Timeline\GeneratePostVideoHls::ENCODING_VERSION) $counts['current_encoding']++;
+          }
+          echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
+          PHP
+          REMOTE
