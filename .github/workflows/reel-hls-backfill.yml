@@ -306,11 +306,12 @@ jobs:
               ->values()
               ->all();
           $sourceFiles = glob(storage_path('app/tmp/reel-hls/*/source.*')) ?: [];
-          $scratch = ['source_files' => count($sourceFiles), 'source_bytes' => 0, 'largest_source_bytes' => 0, 'free_disk_bytes' => (int) (disk_free_space(storage_path()) ?: 0)];
+          $scratch = ['source_files' => count($sourceFiles), 'source_bytes' => 0, 'largest_source_bytes' => 0, 'free_disk_bytes' => (int) (disk_free_space(storage_path()) ?: 0), 'source_details' => []];
           foreach ($sourceFiles as $sourceFile) {
               $size = (int) (filesize($sourceFile) ?: 0);
               $scratch['source_bytes'] += $size;
               $scratch['largest_source_bytes'] = max($scratch['largest_source_bytes'], $size);
+              $scratch['source_details'][] = ['work_id' => basename(dirname($sourceFile)), 'bytes' => $size, 'last_write_age_seconds' => max(0, time() - (int) (filemtime($sourceFile) ?: time()))];
           }
           $hlsLogEvents = ['started' => 0, 'completed' => 0, 'attempt_failed' => 0, 'job_failed' => 0];
           $hlsLogLatestAt = null;
@@ -341,6 +342,13 @@ jobs:
           ] + $processMetrics;
           $counts['worker_scratch'] = $scratch;
           $counts['hls_log_events'] = $hlsLogEvents + ['latest_event_at' => $hlsLogLatestAt];
+          $environment = app()->environment();
+          $counts['video_timeouts'] = [
+              'hls_job_seconds' => max(1800, (int) config('media.reels_hls.timeout_seconds', 21600)),
+              'media_video_worker_seconds' => (int) data_get(config('horizon.environments.'.$environment), 'supervisor-media-video.timeout', 0),
+              'media_video_high_worker_seconds' => (int) data_get(config('horizon.environments.'.$environment), 'supervisor-media-video-high.timeout', 0),
+              'redis_retry_after_seconds' => (int) config('queue.connections.redis.retry_after', 0),
+          ];
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
           PHP
           REMOTE
