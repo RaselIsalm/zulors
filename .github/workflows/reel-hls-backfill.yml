@@ -183,6 +183,7 @@ jobs:
               'hls_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'background_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'hls_background_pairs' => [],
+              'hls_job_progress' => ['queued_max_age_minutes' => 0, 'background_queued_max_age_minutes' => 0, 'processing_progress' => null, 'processing_last_update_age_minutes' => null],
               'current_encoding' => 0,
           ];
           foreach ($items as $item) {
@@ -191,6 +192,18 @@ jobs:
               $backgroundState = data_get($metadata, 'background_processing_state') ?: 'unset';
               $pair = $hlsState.'|'.$backgroundState;
               $counts['hls_background_pairs'][$pair] = ($counts['hls_background_pairs'][$pair] ?? 0) + 1;
+              $updatedAt = data_get($metadata, 'background_processing_updated_at');
+              $updateAge = filled($updatedAt) ? now()->diffInMinutes(\Illuminate\Support\Carbon::parse($updatedAt)) : null;
+              if ($hlsState === 'queued' && $updateAge !== null) {
+                  $counts['hls_job_progress']['queued_max_age_minutes'] = max($counts['hls_job_progress']['queued_max_age_minutes'], $updateAge);
+              }
+              if ($backgroundState === 'queued' && $updateAge !== null) {
+                  $counts['hls_job_progress']['background_queued_max_age_minutes'] = max($counts['hls_job_progress']['background_queued_max_age_minutes'], $updateAge);
+              }
+              if ($hlsState === 'processing') {
+                  $counts['hls_job_progress']['processing_progress'] = (int) data_get($metadata, 'background_processing_progress', 0);
+                  $counts['hls_job_progress']['processing_last_update_age_minutes'] = $updateAge;
+              }
               foreach ([
                   'hls_state' => $hlsState,
                   'background_state' => $backgroundState,
