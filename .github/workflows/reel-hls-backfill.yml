@@ -176,14 +176,14 @@ jobs:
               ->where('status', App\Enums\Media\MediaStatus::PROCESSED->value)
               ->where('mediaable_type', App\Models\Post::class)
               ->where('metadata->provider', 'r2')
-              ->get(['metadata']);
+              ->get(['metadata', 'size']);
           $counts = [
               'total' => $items->count(),
               'active_test_accounts' => App\Models\User::active()->whereRaw('LOWER(email) LIKE ?', ['%.test'])->count(),
               'hls_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'background_state' => ['ready' => 0, 'unset' => 0, 'queued' => 0, 'processing' => 0, 'failed' => 0, 'skipped' => 0, 'other' => 0],
               'hls_background_pairs' => [],
-              'hls_job_progress' => ['queued_max_age_minutes' => 0, 'background_queued_max_age_minutes' => 0, 'processing_progress' => null, 'processing_last_update_age_minutes' => null],
+              'hls_job_progress' => ['queued_max_age_minutes' => 0, 'background_queued_max_age_minutes' => 0, 'processing_progress' => null, 'processing_source_bytes' => null, 'processing_last_update_age_minutes' => null],
               'current_encoding' => 0,
           ];
           foreach ($items as $item) {
@@ -202,6 +202,7 @@ jobs:
               }
               if ($hlsState === 'processing') {
                   $counts['hls_job_progress']['processing_progress'] = (int) data_get($metadata, 'background_processing_progress', 0);
+                  $counts['hls_job_progress']['processing_source_bytes'] = (int) $item->size;
                   $counts['hls_job_progress']['processing_last_update_age_minutes'] = $updateAge;
               }
               foreach ([
@@ -227,15 +228,36 @@ jobs:
           } catch (Throwable $exception) {
               $pendingByQueue['error'] = $exception::class;
           }
-          $processList = (string) shell_exec('ps -eo args= 2>/dev/null');
-          preg_match_all('/(?:^|\\s)(?:\\S*php\\S*\\s+)?artisan\\s+(?:horizon(?::work)?|queue:work)(?=\\s|$)/m', $processList, $workerProcesses);
+          $processList = (string) shell_exec('ps -eo etime=,pcpu=,pmem=,args= 2>/dev/null');
+          $elapsedSeconds = static function (string $value): int {
+              $days = 0;
+              if (str_contains($value, '-')) [$days, $value] = explode('-', $value, 2);
+              $parts = array_map('intval', explode(':', $value));
+              $seconds = count($parts) === 3 ? ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2] : (($parts[0] * 60) + ($parts[1] ?? 0));
+
+              return ((int) $days * 86400) + $seconds;
+          };
+          $processMetrics = ['video_worker_processes' => 0, 'oldest_video_worker_seconds' => 0, 'ffmpeg_processes' => 0, 'max_ffmpeg_cpu_percent' => 0.0, 'oldest_ffmpeg_seconds' => 0];
+          foreach (preg_split('/\\R/', trim($processList)) ?: [] as $processLine) {
+              $parts = preg_split('/\\s+/', trim($processLine), 4);
+              if (count($parts) < 4) continue;
+              [$elapsed, $cpu, $memory, $command] = $parts;
+              if (preg_match('/(?:^|\\s)artisan\\s+(?:horizon:work|queue:work)\\b/', $command) && str_contains($command, 'media-video')) {
+                  $processMetrics['video_worker_processes']++;
+                  $processMetrics['oldest_video_worker_seconds'] = max($processMetrics['oldest_video_worker_seconds'], $elapsedSeconds($elapsed));
+              }
+              if (preg_match('/(?:^|\\s)(?:\\S*\\/)?ffmpeg(?:\\s|$)/', $command)) {
+                  $processMetrics['ffmpeg_processes']++;
+                  $processMetrics['max_ffmpeg_cpu_percent'] = max($processMetrics['max_ffmpeg_cpu_percent'], (float) $cpu);
+                  $processMetrics['oldest_ffmpeg_seconds'] = max($processMetrics['oldest_ffmpeg_seconds'], $elapsedSeconds($elapsed));
+              }
+          }
           $horizonStatusOutput = strtolower(trim((string) shell_exec('php artisan horizon:status 2>&1')));
           $counts['video_queue'] = [
               'connection' => $queueConnection,
               'pending_by_queue' => $pendingByQueue,
               'horizon' => str_contains($horizonStatusOutput, 'running') ? 'running' : 'not_running',
-              'worker_processes' => count($workerProcesses[0]),
-          ];
+          ] + $processMetrics;
           echo json_encode($counts, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), PHP_EOL;
           PHP
           REMOTE
