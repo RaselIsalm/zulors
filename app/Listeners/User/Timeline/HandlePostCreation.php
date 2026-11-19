@@ -24,7 +24,7 @@ class HandlePostCreation
                 ->first();
 
             if($this->canDispatchVideoProcessing($videoMedia)) {
-                ConvertAndCompressPostVideo::dispatch($event->postData)->onQueue(config('media.queues.video'));
+                ConvertAndCompressPostVideo::dispatch($event->postData)->onQueue(config('media.queues.video_high'));
             }
         }
 

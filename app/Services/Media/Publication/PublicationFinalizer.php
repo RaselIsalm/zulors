@@ -11,6 +11,7 @@ use App\Enums\User\UserStatus;
 use App\Events\User\Chat\MessageMediaReadyEvent;
 use App\Events\User\Timeline\MediaProcessedEvent;
 use App\Jobs\Media\DeliverPublicationEvent;
+use App\Jobs\User\Timeline\ConvertAndCompressPostVideo;
 use App\Actions\Media\DeleteMediaAction;
 use App\Models\Chat;
 use App\Models\Comment;
@@ -119,8 +120,10 @@ class PublicationFinalizer
                         $metadata = $media->metadata ?? [];
                         $hlsEnabled = (bool) config('media.reels_hls.enabled', false);
                         $metadata['playback_state'] = 'ready';
-                        $metadata['background_processing_state'] = $hlsEnabled ? 'queued' : 'skipped';
-                        $metadata['background_processing_progress'] = $hlsEnabled ? 0 : 100;
+                        $metadata['processing_state'] = 'queued';
+                        $metadata['processing_progress'] = 0;
+                        $metadata['background_processing_state'] = 'queued';
+                        $metadata['background_processing_progress'] = 0;
                         $metadata['background_processing_updated_at'] = now()->toIso8601String();
                         $metadata['background_processing_dispatched_at'] = now()->toIso8601String();
                         $metadata['background_processing_attempts'] = 0;
@@ -132,9 +135,8 @@ class PublicationFinalizer
                         $media->metadata = $metadata;
                         $media->save();
 
-                        if ($hlsEnabled) {
-                            DB::afterCommit(fn () => app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($media));
-                        }
+                        DB::afterCommit(fn () => ConvertAndCompressPostVideo::dispatch($entity)
+                            ->onQueue(config('media.queues.video_high')));
                     }
                 }
 

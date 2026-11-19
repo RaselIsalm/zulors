@@ -1,14 +1,13 @@
 # Adaptive video playback and HLS processing
 
-R2 post video processing keeps an exact original copy in R2 before creating the
-optimized MP4 playback copy. The original is retained for future re-encoding and
-is not included in the public media resource. When HLS processing is enabled,
-`GeneratePostVideoHls` runs on the existing `media-video-normal` queue and
-creates a master playlist plus 240p, 360p, 480p, 720p and 1080p renditions that
-do not exceed the source height. It reads the retained original when available,
-and falls back to the MP4 for older uploads. The master playlist is published
-only after its segments are uploaded. The optimized MP4 remains the playback
-fallback throughout processing and after a failed job.
+Post video publication queues FFmpeg optimization after the verified R2 upload.
+The worker archives an exact original in R2, creates an H.264/AAC MP4 and
+thumbnail, then queues HLS. When HLS processing is enabled,
+`GeneratePostVideoHls` reads the current optimized playback MP4 and creates a
+master playlist plus 240p, 360p, 480p, 720p and 1080p renditions, capped at the
+source height. The master playlist is published only after its segments are
+uploaded. If optimization exhausts its retries, the raw MP4 stays playable and
+HLS can be generated from it as a fallback.
 
 The production media pipeline serves these public R2 objects through the
 Cloudflare cached custom domain (`media.zulors.com`). Playlists and segments
@@ -46,10 +45,12 @@ MEDIA_REELS_HLS_TIMEOUT_SECONDS=21600
 MEDIA_REELS_HLS_STALE_AFTER_MINUTES=120
 ```
 
-FFmpeg with `libx264` and AAC support must be available to the Horizon worker
-consuming `media-video-normal`. The production media pipeline configuration
-enables processing for newly published R2 post videos and exposes HLS to all
-viewers. Turning the flag off immediately makes
+FFmpeg with `libx264` and AAC support must be available to the Horizon workers
+consuming `media-video-high` (new MP4 optimization) and the configured normal
+video queue (HLS; live legacy alias `media-video`). Post MP4 optimization runs
+for newly published R2 post videos. The HLS flag
+controls rendition generation and HLS URL exposure for all viewers. Turning
+the flag off immediately makes
 R2 playback use the MP4 again; Cloudflare Stream media keeps its existing
 playback path. Previously uploaded MP4s are not batch-transcoded by deploy;
 they remain playable and can be queued in bounded batches with

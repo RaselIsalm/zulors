@@ -18,6 +18,7 @@ use App\Events\User\Timeline\PublicTimelinePostCreatedEvent;
 use App\Traits\Http\Api\SupportsApiResponses;
 use App\Services\Media\Cloudflare\R2DirectUploadService;
 use App\Services\Media\Cloudflare\CloudflareStreamService;
+use App\Jobs\User\Timeline\ConvertAndCompressPostVideo;
 use App\Services\Media\ReelsHlsRollout;
 use App\Support\StoryMusic\OriginalAudioEligibility;
 use App\Traits\Http\Controllers\Api\User\Timeline\InteractsWithDraftPost;
@@ -404,8 +405,8 @@ class DirectMediaUploadController extends Controller
             'processing_progress' => 100,
             'processing_updated_at' => $now,
             'playback_state' => 'ready',
-            'background_processing_state' => app(ReelsHlsRollout::class)->processingEnabled() ? 'queued' : 'skipped',
-            'background_processing_progress' => app(ReelsHlsRollout::class)->processingEnabled() ? 0 : 100,
+            'background_processing_state' => 'queued',
+            'background_processing_progress' => 0,
             'background_processing_updated_at' => $now,
             'background_processing_dispatched_at' => $now,
             'background_processing_attempts' => 0,
@@ -430,10 +431,12 @@ class DirectMediaUploadController extends Controller
         $media->status = MediaStatus::PROCESSED;
         $media->save();
 
-        app(ReelsHlsRollout::class)->dispatch($media);
         $media->load('mediaable');
 
         $post = $media->mediaable;
+        if ($post instanceof Post) {
+            ConvertAndCompressPostVideo::dispatch($post)->onQueue(config('media.queues.video_high'));
+        }
         $postWasProcessing = $post instanceof Post && $post->status === PostStatus::PROCESSING_VIDEO;
 
         if($postWasProcessing) {

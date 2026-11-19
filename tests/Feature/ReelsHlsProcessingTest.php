@@ -37,6 +37,50 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame([], GeneratePostVideoHls::renditionHeightsForSource(180));
     }
 
+    public function test_hls_uses_the_optimized_playback_object_when_an_original_archive_exists(): void
+    {
+        Storage::fake('r2_final');
+        $media = $this->video($this->createPost($this->user()), [
+            'original_storage' => [
+                'disk' => 'r2_final',
+                'path' => 'uploads/posts/videos/originals/1/source.mov',
+                'size' => 999,
+                'mime' => 'video/quicktime',
+                'extension' => 'mov',
+            ],
+        ]);
+
+        $method = new \ReflectionMethod(GeneratePostVideoHls::class, 'sourceDescriptor');
+        $method->setAccessible(true);
+        $source = $method->invoke(new GeneratePostVideoHls((int) $media->id), $media);
+
+        $this->assertSame('r2_final', $source['disk']);
+        $this->assertSame($media->source_path, $source['path']);
+        $this->assertSame((int) $media->size, $source['size']);
+        $this->assertSame('mp4', $source['extension']);
+    }
+
+    public function test_failed_mp4_optimization_queues_hls_from_the_still_playable_r2_source(): void
+    {
+        Queue::fake();
+        config(['media.reels_hls.enabled' => true]);
+        Storage::fake('r2_final');
+        $media = $this->video($this->createPost($this->user()), [
+            'processing_mode' => 'original_direct',
+            'upload_state' => 'uploaded',
+            'background_processing_state' => 'failed',
+            'playback' => ['hls_state' => 'skipped'],
+        ]);
+
+        $job = new \App\Jobs\User\Timeline\ConvertAndCompressPostVideo($media->mediaable);
+        $job->failed(new RuntimeException('simulated optimizer failure'));
+
+        $media->refresh();
+        $this->assertSame('queued', data_get($media->metadata, 'background_processing_state'));
+        $this->assertSame('queued', data_get($media->metadata, 'playback.hls_state'));
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $queued): bool => $queued->mediaId === (int) $media->id);
+    }
+
     public function test_r2_hls_url_is_exposed_to_all_viewers_when_enabled_and_internal_signature_is_hidden(): void
     {
         Storage::fake('r2_final');

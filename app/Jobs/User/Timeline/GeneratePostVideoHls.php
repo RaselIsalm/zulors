@@ -110,7 +110,29 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 'queue_age_seconds' => $queueAgeSeconds,
             ]);
 
-            $this->downloadSource($source, $sourcePath);
+            $downloadStartedAt = microtime(true);
+            $this->downloadSource($source, $sourcePath, function (int $downloadedBytes, int $totalBytes) use ($media): void {
+                static $lastHeartbeat = 0;
+                $now = time();
+                if ($downloadedBytes < $totalBytes && $now - $lastHeartbeat < 15) {
+                    return;
+                }
+                $lastHeartbeat = $now;
+                $progress = $totalBytes > 0 ? min(5, 1 + (int) floor(4 * $downloadedBytes / $totalBytes)) : 1;
+                $this->updateMetadata($media, static function (array $next) use ($progress): array {
+                    $next['background_processing_state'] = 'processing';
+                    $next['background_processing_progress'] = max((int) ($next['background_processing_progress'] ?? 0), $progress);
+                    $next['background_processing_updated_at'] = now()->toIso8601String();
+                    $next['playback_state'] = 'ready';
+                    $next['playback'] = array_merge((array) ($next['playback'] ?? []), ['hls' => null, 'hls_state' => 'processing']);
+
+                    return $next;
+                }, false);
+            });
+            Log::channel('performance')->info('reel_hls_source_download_completed', [
+                'download_duration_seconds' => round(microtime(true) - $downloadStartedAt, 3),
+                'source_bytes' => (int) ($source['size'] ?? 0),
+            ]);
             $dimensions = $videoUploadService->getVideoDimensions($sourcePath);
             $sourceHeight = (int) ($dimensions['height'] ?? 0);
             $sourceWidth = (int) ($dimensions['width'] ?? 0);
@@ -272,17 +294,18 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     private function sourceDescriptor(Media $media): array
     {
         $original = (array) data_get($media->metadata, 'original_storage', []);
+        $useOriginalFallback = blank($media->source_path) || blank($media->disk);
 
         return [
-            'disk' => (string) ($original['disk'] ?? $media->disk),
-            'path' => (string) ($original['path'] ?? $media->source_path),
-            'size' => (int) ($original['size'] ?? $media->size),
-            'mime' => (string) ($original['mime'] ?? $media->mime),
-            'extension' => (string) ($original['extension'] ?? $media->extension),
+            'disk' => (string) ($useOriginalFallback ? ($original['disk'] ?? $media->disk) : $media->disk),
+            'path' => (string) ($useOriginalFallback ? ($original['path'] ?? $media->source_path) : $media->source_path),
+            'size' => (int) ($useOriginalFallback ? ($original['size'] ?? $media->size) : $media->size),
+            'mime' => (string) ($useOriginalFallback ? ($original['mime'] ?? $media->mime) : $media->mime),
+            'extension' => (string) ($useOriginalFallback ? ($original['extension'] ?? $media->extension) : $media->extension),
         ];
     }
 
-    private function downloadSource(array $source, string $destination): void
+    private function downloadSource(array $source, string $destination, ?callable $onProgress = null): void
     {
         $stream = Storage::disk($source['disk'])->readStream($source['path']);
 
@@ -291,12 +314,50 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
 
         try {
+            @stream_set_timeout($stream, 60);
             $target = fopen($destination, 'wb');
             if (! is_resource($target)) {
                 throw new RuntimeException('Unable to create a temporary HLS source file.');
             }
-            stream_copy_to_stream($stream, $target);
-            fclose($target);
+            $downloadedBytes = 0;
+            $totalBytes = (int) ($source['size'] ?? 0);
+            $lastProgressAt = time();
+
+            try {
+                while (! feof($stream)) {
+                    $chunk = fread($stream, 1024 * 1024);
+                    if ($chunk === false) {
+                        throw new RuntimeException('Unable to read the playback-ready video source.');
+                    }
+                    if ($chunk === '') {
+                        $streamStatus = stream_get_meta_data($stream);
+                        if (! empty($streamStatus['timed_out'])) {
+                            throw new RuntimeException('Timed out while downloading the playback-ready video source.');
+                        }
+                        if (! feof($stream)) {
+                            continue;
+                        }
+                        break;
+                    }
+
+                    $writtenBytes = fwrite($target, $chunk);
+                    if ($writtenBytes !== strlen($chunk)) {
+                        throw new RuntimeException('Unable to write the complete temporary HLS source file.');
+                    }
+
+                    $downloadedBytes += $writtenBytes;
+                    if ($onProgress && (time() - $lastProgressAt >= 15 || ($totalBytes > 0 && $downloadedBytes >= $totalBytes))) {
+                        $onProgress($downloadedBytes, $totalBytes);
+                        $lastProgressAt = time();
+                    }
+                }
+            } finally {
+                fclose($target);
+            }
+
+            if ($totalBytes > 0 && $downloadedBytes !== $totalBytes) {
+                throw new RuntimeException('Downloaded HLS source size does not match the stored media size.');
+            }
         } finally {
             fclose($stream);
         }

@@ -21,27 +21,28 @@ direct-upload hardening work. Production was not contacted.
 Other relevant code: `R2DirectUploadService` signs single PUT and multipart URLs,
 but also exposes raw/part application-server proxy methods. The app can retry
 small direct-upload failures through those endpoints when fallback budgets are
-nonzero. `PublicationMediaProcessor` downloads direct R2 publication objects to
-`storage/app/tmp/publications`, uses GD/FFmpeg and writes optimized outputs.
-Temporary-bucket lifecycle cleanup exists, but it is not a substitute for
-persisting a completed original into the final bucket.
+nonzero. `PublicationMediaProcessor` verifies metadata and promotes uploaded
+objects with an R2-side copy. After a post video is published, the queued media
+worker downloads it to temporary local storage for FFmpeg optimization and
+uploads the playback MP4, thumbnail and original archive to R2. The upload
+request itself never carries the video body through Laravel.
 
 ## Architecture gap
 
-The selected R2-only path prepares eligible images on-device, sends videos and
-documents unchanged through short-lived, object-scoped R2 single-PUT or
-multipart sessions, and has the API check owner, operation, declared and actual
-size, MIME policy, quota and R2 object metadata before it stores the R2 key and
-completes the post/story/chat/profile association. The app server does not
-receive media bodies, create media temp files or run GD/FFmpeg on user media.
-Multipart retries resume the same object and idempotency key; incomplete
-uploads and abandoned temp objects expire.
+The selected R2-only transfer path prepares eligible images on-device and sends
+videos and documents through short-lived, object-scoped R2 single-PUT or
+multipart sessions. The API checks owner, operation, declared and actual size,
+MIME policy, quota and R2 object metadata before it stores the R2 key and
+completes the post/story/chat/profile association. After post publication, the
+media worker uses temporary local storage for FFmpeg work. Multipart retries
+resume the same object and idempotency key; incomplete uploads and abandoned
+temp objects expire.
 
 ## Implemented architecture
 
 | Category | Current client/API path | Server behavior |
 | --- | --- | --- |
-| Post/reel image, video, audio and document | Publication editor/outbox → `/api/media-publications` create/resume/complete | Signed R2 PUT/multipart; verify and server-side promote. |
+| Post/reel image, video, audio and document | Publication editor/outbox → `/api/media-publications` create/resume/complete | Signed R2 PUT/multipart; verify and server-side promote. Post videos queue FFmpeg MP4 optimization and then optional HLS. |
 | Story image and video | Story editor/outbox → `/api/media-publications` with `kind=story` | Same direct R2 path; no story FFmpeg worker. |
 | Chat image, video, audio and document | Chat store/editor → `/api/media-publications` with `kind=chat` | Same direct R2 path; old chat `/send` multipart and `/audio/{id}/upload` are blocked. |
 | Profile avatar, cover and onboarding avatar | Profile/onboarding UI → `/api/media-uploads/create` and `/complete` | Signed R2 single or multipart upload, verified and associated with the user. |

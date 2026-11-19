@@ -10,9 +10,13 @@ bodies on the upload request path. Images can be resized in a browser worker.
 Videos are sent in their original bytes so phones do not spend time, battery or
 RAM re-encoding them. Documents remain unchanged.
 
-When optional Reels HLS is enabled, the background queue worker reads the
-verified R2 source into a temporary worker directory for FFmpeg and removes
-that working directory after the job. HLS output is written back to R2.
+Post video publication remains immediate after R2 verifies the uploaded object.
+The media worker then downloads that R2 source to temporary local storage,
+preserves an exact original copy in R2, creates an H.264/AAC MP4 and thumbnail
+with FFmpeg, and removes its local scratch files. When Reels HLS is enabled, a
+second job creates adaptive renditions from the optimized playback MP4 and
+writes the manifest and segments to R2. A failed optimization leaves the source
+playable and can still queue HLS from that source.
 
 The upload button starts the R2 transfer without a video-preparation step. The
 browser persists part ETags for retry/resume, and repeat create/complete requests
@@ -30,16 +34,14 @@ user's network upload speed. Browser playback also depends on the codec inside
 the original container; the upload API checks declared type and R2 size/type
 metadata but does not inspect the video bitstream or prove its duration.
 
-The post video worker preserves the original R2 upload before legacy
-optimization creates a playback MP4. Reels HLS runs FFmpeg on the existing
-`media-video-normal` queue and reads that original when available, then writes
-separate 240p/360p/480p/720p/1080p renditions to the final R2 disk when the
-source resolution supports them. The HLS files can
-increase total storage, and the worker adds CPU cost; they are for adaptive
-playback on constrained networks, not a claim that the original file was
-compressed. The post stays playable from its MP4 while this work runs or fails.
-See [Reels HLS processing](reels-hls-processing.md) for its rollout and recovery
-controls.
+The post video worker preserves the original R2 upload before replacing the
+playback object with its optimized MP4. New compression jobs use the configured
+high-priority video queue; Reels HLS reads the optimized MP4 from the normal
+video queue and writes separate 240p/360p/480p/720p/1080p renditions to the
+final R2 disk, limited by the source resolution. The post remains playable from
+its current MP4 while these jobs run or fail. Originals and HLS renditions add
+storage, and FFmpeg adds CPU cost. See
+[Reels HLS processing](reels-hls-processing.md) for rollout and recovery.
 
 ## R2 cost model
 

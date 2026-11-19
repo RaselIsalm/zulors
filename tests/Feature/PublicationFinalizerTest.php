@@ -138,6 +138,7 @@ class PublicationFinalizerTest extends TestCase
         $this->assertSame('queued', data_get($media->metadata, 'background_processing_state'));
         $this->assertSame('queued', data_get($media->metadata, 'playback.hls_state'));
         $this->assertNull(data_get($media->metadata, 'playback.hls'));
+        Bus::assertDispatched(ConvertAndCompressPostVideo::class, fn (ConvertAndCompressPostVideo $job): bool => $job->queue === config('media.queues.video_high'));
     }
 
     public function test_comment_photo_publication_creates_one_comment_only_after_the_image_is_ready(): void
@@ -663,7 +664,7 @@ class PublicationFinalizerTest extends TestCase
         $this->assertSame($previous->id, Auth::id());
         $this->assertSame(1, (int) $actor->fresh()->publications_count);
         $this->assertSame($burst, app(SafetyService::class)->userSafety($actor)->post_burst_count);
-        Bus::assertNotDispatched(ConvertAndCompressPostVideo::class);
+        Bus::assertDispatchedTimes(ConvertAndCompressPostVideo::class, 1);
         $this->assertNotNull(Post::find($published->result['id']));
     }
 
@@ -755,7 +756,7 @@ class PublicationFinalizerTest extends TestCase
         $this->assertSame(1, $recipient->notifications()->count());
     }
 
-    public function test_processed_videos_skip_legacy_transcodes_while_unprocessed_videos_still_dispatch(): void
+    public function test_published_post_video_queues_optimization_and_unprocessed_video_events_still_dispatch(): void
     {
         $actor = $this->user();
         $postPublication = $this->finalize($this->publication($actor, 'post', ['video']));
@@ -766,7 +767,7 @@ class PublicationFinalizerTest extends TestCase
             app(HandlePostCreation::class)->handle(new PostCreatedEvent($post));
             app(HandleStoryCreation::class)->handle(new StoryCreatedEvent($frame));
         });
-        Bus::assertNotDispatched(ConvertAndCompressPostVideo::class);
+        Bus::assertDispatchedTimes(ConvertAndCompressPostVideo::class, 1);
         Bus::assertNotDispatched(ProcessStoryVideo::class);
         foreach ([$post, $frame] as $entity) {
             $entity->media->first()->update(['status' => MediaStatus::UNPROCESSED, 'metadata' => []]);
@@ -776,7 +777,7 @@ class PublicationFinalizerTest extends TestCase
             app(HandlePostCreation::class)->handle(new PostCreatedEvent($post));
             app(HandleStoryCreation::class)->handle(new StoryCreatedEvent($frame));
         });
-        Bus::assertDispatchedTimes(ConvertAndCompressPostVideo::class, 1);
+        Bus::assertDispatchedTimes(ConvertAndCompressPostVideo::class, 2);
         Bus::assertDispatchedTimes(ProcessStoryVideo::class, 1);
     }
 

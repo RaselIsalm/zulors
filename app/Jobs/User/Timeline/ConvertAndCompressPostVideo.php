@@ -37,6 +37,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
     {
         $this->postData = $postData;
         $this->onConnection(config('media.queue_connection'));
+        $this->onQueue(config('media.queues.video_high'));
         $this->timeout = max(60 * 30, (int) config('post.processing.video.timeout', $this->timeout));
     }
 
@@ -88,7 +89,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
             $this->updateProcessingProgress($postMedia, 10, 'preparing');
 
             // Get video video local temporary path
-            $remoteSource = in_array(data_get($postMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true);
+            $remoteSource = $this->isRemoteR2Source($postMedia);
             $videoTempOldPath = $this->prepareLocalSourceVideo($postMedia, $videoUploadService);
             $videoUploadService->validateVideoSource($videoTempOldPath);
 
@@ -181,6 +182,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                 $postMedia->size = $videoData['video_size'] ?? filesize($videoNewAbsLocalPath);
                 $postMedia->metadata = array_merge($metadata, $videoPresentationMetadata, [
                     'provider' => in_array(data_get($metadata, 'provider'), ['r2_temp', 'r2_direct'], true) ? 'r2' : data_get($metadata, 'provider'),
+                    'processing_mode' => 'optimized_mp4',
                     'processed_at' => now()->toIso8601String(),
                     'processing_progress' => 100,
                     'processing_state' => 'processed',
@@ -257,9 +259,34 @@ class ConvertAndCompressPostVideo implements ShouldQueue
         return [30, 120, 300, 600];
     }
 
+    public function failed(\Throwable $exception): void
+    {
+        $postMedia = $this->postData->media()->first();
+        if (! $postMedia || ! $postMedia->status->isProcessed()
+            || data_get($postMedia->metadata, 'provider') !== 'r2'
+            || ! app(\App\Services\Media\ReelsHlsRollout::class)->processingEnabled()) {
+            return;
+        }
+
+        $metadata = $postMedia->metadata ?? [];
+        $metadata['playback_state'] = 'ready';
+        $metadata['background_processing_state'] = 'queued';
+        $metadata['background_processing_progress'] = 0;
+        $metadata['background_processing_updated_at'] = now()->toIso8601String();
+        $metadata['background_processing_dispatched_at'] = now()->toIso8601String();
+        $metadata['playback'] = array_merge((array) ($metadata['playback'] ?? []), [
+            'hls' => null,
+            'hls_state' => 'queued',
+        ]);
+        $postMedia->metadata = $metadata;
+        $postMedia->save();
+
+        app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($postMedia->refresh());
+    }
+
     private function prepareLocalSourceVideo($postMedia, VideoUploadService $videoUploadService): string
     {
-        if(! in_array(data_get($postMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true)) {
+        if(! $this->isRemoteR2Source($postMedia)) {
             return $postMedia->source_path;
         }
 
@@ -296,7 +323,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
 
     private function targetStorageDisk($postMedia): string
     {
-        if(in_array(data_get($postMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true)) {
+        if($this->isRemoteR2Source($postMedia)) {
             return (string) data_get($postMedia->metadata, 'final_disk', config('media.cloudflare.r2.final_disk'));
         }
 
@@ -389,9 +416,17 @@ class ConvertAndCompressPostVideo implements ShouldQueue
         $metadata = $postMedia->metadata ?? [];
 
         return $postMedia->status->isProcessed()
-            && in_array(data_get($metadata, 'provider'), ['r2_temp', 'r2_direct'], true)
+            && $this->isRemoteR2Source($postMedia)
             && data_get($metadata, 'upload_state') === 'uploaded'
             && blank(data_get($metadata, 'processed_at'));
+    }
+
+    private function isRemoteR2Source($postMedia): bool
+    {
+        $provider = (string) data_get($postMedia->metadata, 'provider');
+
+        return in_array($provider, ['r2_temp', 'r2_direct'], true)
+            || ($provider === 'r2' && data_get($postMedia->metadata, 'processing_mode') === 'original_direct');
     }
 
     private function broadcastMediaUpdated($postMedia): void

@@ -7,6 +7,7 @@ use App\Enums\User\UserStatus;
 use App\Jobs\Media\CleanupPublication;
 use App\Jobs\Media\FinalizePublication;
 use App\Jobs\Media\ProcessPublicationItem;
+use App\Jobs\User\Timeline\ConvertAndCompressPostVideo;
 use App\Models\Chat;
 use App\Models\MediaPublication;
 use App\Models\MediaPublicationItem;
@@ -856,7 +857,7 @@ class MediaPublicationApiTest extends TestCase
         Bus::assertNothingDispatched();
     }
 
-    public function test_instant_published_video_releases_admission_capacity_without_server_optimization(): void
+    public function test_instant_published_video_releases_admission_capacity_and_queues_server_optimization(): void
     {
         config(['media.publications.per_user_limit' => 1, 'media.publications.video_limit' => 1]);
         $this->actingAs($this->createUser());
@@ -871,6 +872,8 @@ class MediaPublicationApiTest extends TestCase
         $this->assertNotNull($queuedAt);
         $this->assertDatabaseCount('posts', 1);
         $this->assertDatabaseCount('media', 1);
+        $this->assertSame('queued', data_get(\App\Models\Media::query()->latest('id')->firstOrFail()->metadata, 'background_processing_state'));
+        Bus::assertDispatched(ConvertAndCompressPostVideo::class, fn (ConvertAndCompressPostVideo $job): bool => $job->queue === config('media.queues.video_high'));
 
         $this->actingAs($this->createUser());
         $this->postJson(self::API, $this->payload('post', 'video'))->assertCreated();

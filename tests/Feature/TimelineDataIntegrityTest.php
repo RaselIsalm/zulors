@@ -178,6 +178,62 @@ class TimelineDataIntegrityTest extends TestCase
         if($large) fwrite(STDERR, sprintf("\nLocal large-video verification: original=%d bytes, optimized=%d bytes, temp_deleted=yes\n", $originalSize, $media->size));
     }
 
+    public function test_real_ffmpeg_worker_optimizes_an_instant_published_r2_original(): void
+    {
+        $binary = (new \Symfony\Component\Process\ExecutableFinder())->find('ffmpeg');
+        if(! $binary) $this->markTestSkipped('FFmpeg is required for the media integration test.');
+        Event::fake([MediaUpdatedEvent::class, MediaProcessedEvent::class, PublicTimelinePostCreatedEvent::class]);
+        $original = $this->createVideoFixture();
+        $sourceDisk = \Illuminate\Support\Facades\Storage::disk('r2_temp');
+        $finalDisk = \Illuminate\Support\Facades\Storage::disk('r2_final');
+        $publishedPath = 'uploads/publications/test/instant-original.avi';
+        $finalDisk->put($publishedPath, $sourceDisk->get($original['source_path']));
+        $sourceDisk->delete($original['source_path']);
+        app()->instance(R2DirectUploadService::class, new \Tests\Support\FakeR2DirectUploadService());
+        $owner = $this->createUser('instant-r2-optimization-owner');
+        $post = $this->createPost($owner, 'Instant published R2 video', null, [
+            'status' => PostStatus::ACTIVE,
+            'type' => PostType::VIDEO,
+        ]);
+        $media = $post->media()->create([
+            'source_path' => $publishedPath,
+            'type' => MediaKind::VIDEO,
+            'status' => MediaStatus::PROCESSED,
+            'disk' => 'r2_final',
+            'thumbnail_disk' => 'r2_final',
+            'extension' => 'avi',
+            'mime' => 'video/x-msvideo',
+            'size' => $original['size'],
+            'metadata' => [
+                'provider' => 'r2',
+                'upload_state' => 'uploaded',
+                'processing_mode' => 'original_direct',
+                'final_disk' => 'r2_final',
+                'original_size' => $original['size'],
+                'background_processing_state' => 'queued',
+            ],
+        ]);
+
+        (new ConvertAndCompressPostVideo($post))->handle(app(R2DirectUploadService::class));
+
+        $media->refresh();
+        $this->assertSame(MediaStatus::PROCESSED, $media->status);
+        $this->assertSame('r2', data_get($media->metadata, 'provider'));
+        $this->assertSame('optimized_mp4', data_get($media->metadata, 'processing_mode'));
+        $this->assertNotEmpty(data_get($media->metadata, 'processed_at'));
+        $this->assertSame('video/mp4', $media->mime);
+        $finalDisk->assertMissing($publishedPath);
+        $finalDisk->assertExists($media->source_path);
+        $originalStorage = data_get($media->metadata, 'original_storage');
+        $finalDisk->assertExists($originalStorage['path']);
+        $this->assertSame($original['size'], (int) $originalStorage['size']);
+        $this->assertSame(
+            data_get($original, 'metadata.fixture_sha256'),
+            hash_file('sha256', $finalDisk->path($originalStorage['path']))
+        );
+        $this->assertLessThan($original['size'], $finalDisk->size($media->source_path));
+    }
+
     public function test_eight_gib_direct_upload_metadata_and_duration_limit_validation(): void
     {
         \Illuminate\Support\Facades\Bus::fake();
@@ -857,6 +913,7 @@ class TimelineDataIntegrityTest extends TestCase
 
     public function test_direct_r2_multipart_completion_accepts_missing_browser_etags(): void
     {
+        \Illuminate\Support\Facades\Bus::fake();
         config([
             'filesystems.disks.r2_final' => [
                 'driver' => 'local',
@@ -949,6 +1006,10 @@ class TimelineDataIntegrityTest extends TestCase
 
         $this->assertSame(2, $service->expectedParts);
         $this->assertCount(2, $service->receivedParts);
+        \Illuminate\Support\Facades\Bus::assertDispatched(
+            ConvertAndCompressPostVideo::class,
+            fn (ConvertAndCompressPostVideo $job): bool => $job->queue === config('media.queues.video_high')
+        );
     }
 
     public function test_legacy_final_bucket_direct_video_upload_publishes_original_without_transcoding(): void
@@ -1047,7 +1108,7 @@ class TimelineDataIntegrityTest extends TestCase
         Event::assertDispatched(MediaUpdatedEvent::class);
         Event::assertNotDispatched(MediaProcessedEvent::class);
         Event::assertDispatched(PublicTimelinePostCreatedEvent::class);
-        \Illuminate\Support\Facades\Bus::assertNotDispatched(ConvertAndCompressPostVideo::class);
+        \Illuminate\Support\Facades\Bus::assertDispatched(ConvertAndCompressPostVideo::class);
     }
 
     public function test_owner_can_edit_processing_video_post_caption(): void
