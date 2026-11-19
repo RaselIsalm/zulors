@@ -39,7 +39,10 @@ class ReconcileReelHlsProcessing extends Command
                 })
                 ->where(function ($state): void {
                     $state->whereNull('metadata->background_processing_state')
-                        ->orWhereNotIn('metadata->background_processing_state', ['queued', 'processing']);
+                        // A prior dispatch can be lost while metadata remains queued.
+                        // GeneratePostVideoHls is unique per media ID, so redispatching
+                        // queued rows safely recovers that gap without duplicating work.
+                        ->orWhereNotIn('metadata->background_processing_state', ['processing']);
                 })
                 ->orderBy('id');
         } else {

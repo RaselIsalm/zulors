@@ -314,6 +314,27 @@ class ReelsHlsProcessingTest extends TestCase
         Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $oldMedia->id);
     }
 
+    public function test_rebuild_recovers_queued_video_rows_with_missing_hls_output(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => true]);
+        $media = $this->video($this->createPost($this->user()), [
+            'background_processing_state' => 'queued',
+            'background_processing_updated_at' => now()->subMinutes(20)->toIso8601String(),
+            'background_processing_dispatched_at' => now()->subMinutes(20)->toIso8601String(),
+            'playback' => ['hls' => null, 'hls_state' => 'unset'],
+        ]);
+
+        $this->artisan('media:reconcile-reel-hls', ['--rebuild' => true, '--limit' => 15])
+            ->expectsOutput('Requeued 1 reel HLS job(s).')
+            ->assertSuccessful();
+
+        $this->assertSame('queued', data_get($media->fresh()->metadata, 'playback.hls_state'));
+        Queue::assertPushedTimes(GeneratePostVideoHls::class, 1);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $media->id);
+    }
+
     public function test_performance_playback_metrics_discard_identifying_fields(): void
     {
         $logger = Mockery::mock();
