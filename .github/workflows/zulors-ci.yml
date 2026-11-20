@@ -48,10 +48,15 @@ jobs:
           cache: npm
 
       - name: Install FFmpeg test dependency
-        timeout-minutes: 8
+        timeout-minutes: 20
         run: |
+          if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            exit 0
+          fi
           sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=5 -o Acquire::http::Timeout=60 -o Acquire::https::Timeout=60 ffmpeg
 
       - name: Prepare CI environment
         run: |
