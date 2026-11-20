@@ -219,7 +219,7 @@ jobs:
               ->where('status', App\Enums\Media\MediaStatus::PROCESSED->value)
               ->where('mediaable_type', App\Models\Post::class)
               ->where('metadata->provider', 'r2')
-              ->get(['metadata', 'size']);
+              ->get(['id', 'mediaable_id', 'metadata', 'size']);
           $counts = [
               'total' => $items->count(),
               'active_test_accounts' => App\Models\User::active()->whereRaw('LOWER(email) LIKE ?', ['%.test'])->count(),
@@ -228,6 +228,8 @@ jobs:
               'hls_background_pairs' => [],
               'hls_job_progress' => ['queued_max_age_minutes' => 0, 'background_queued_max_age_minutes' => 0, 'processing_progress' => null, 'processing_source_bytes' => null, 'processing_last_update_age_minutes' => null],
               'current_encoding' => 0,
+              'backfill_candidate_count' => 0,
+              'backfill_candidates' => [],
           ];
           foreach ($items as $item) {
               $metadata = $item->metadata ?? [];
@@ -254,6 +256,18 @@ jobs:
               ] as $field => $value) {
                   $state = $value ?: 'unset';
                   $counts[$field][array_key_exists($state, $counts[$field]) ? $state : 'other']++;
+              }
+              if (in_array($hlsState, ['unset', 'failed'], true)
+                  && ! in_array($backgroundState, ['queued', 'processing'], true)) {
+                  $counts['backfill_candidate_count']++;
+                  if (count($counts['backfill_candidates']) < 200) {
+                      $counts['backfill_candidates'][] = [
+                          'media_id' => (int) $item->id,
+                          'post_id' => (int) $item->mediaable_id,
+                          'hls_state' => $hlsState,
+                          'background_state' => $backgroundState,
+                      ];
+                  }
               }
               if (data_get($metadata, 'playback.encoding_version') === App\Jobs\User\Timeline\GeneratePostVideoHls::ENCODING_VERSION) $counts['current_encoding']++;
           }
