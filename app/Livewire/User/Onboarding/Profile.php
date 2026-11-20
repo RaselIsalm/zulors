@@ -20,6 +20,7 @@ class Profile extends OnboardingBase
 
     public function mount()
     {
+        $this->birthDaysList = [];
         $this->microSteps = [
             // Social providers usually supply these fields already. Do not
             // make users click through steps that are already complete.
@@ -67,31 +68,76 @@ class Profile extends OnboardingBase
         }
 
         else{
-            $month = is_numeric($this->birthMonth) ? (int) $this->birthMonth : 0;
-            $day = is_numeric($this->birthDay) ? (int) $this->birthDay : 0;
-            $year = is_numeric($this->birthYear) ? (int) $this->birthYear : 0;
-            $normalizedMonth = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
-            $allowedYears = array_column($this->birthYearsList, 'key');
-
-            if(
-                ! in_array($normalizedMonth, array_column($this->birthMonthsList, 'key'), true) ||
-                ! in_array((string) $year, $allowedYears, true) ||
-                ! checkdate($month, $day, $year)
-            ) {
-                $this->addError('birthdateError', __('auth.birthdate_required'));
+            if (! $this->validateBirthdate()) {
+                return;
             }
-            else{
-                // Save the selected values with the Continue action itself.
-                // This avoids depending on three separate live model requests
-                // having completed before the user taps Continue.
-                me()->update([
-                    'birth_month' => $normalizedMonth,
-                    'birth_day' => (string) $day,
-                    'birth_year' => (string) $year,
-                ]);
 
-                $this->redirect($this->getNextStepRoute($this->stepIndex));
+            // Save the selected values with the Continue action itself.
+            // This avoids depending on three separate live model requests
+            // having completed before the user taps Continue.
+            me()->update([
+                'birth_month' => str_pad((string) (int) $this->birthMonth, 2, '0', STR_PAD_LEFT),
+                'birth_day' => (string) (int) $this->birthDay,
+                'birth_year' => (string) (int) $this->birthYear,
+            ]);
+
+            $this->redirect($this->getNextStepRoute($this->stepIndex));
+        }
+    }
+
+    private function validateBirthdate(): bool
+    {
+        $this->clearBirthdateErrors();
+
+        $monthValue = trim((string) ($this->birthMonth ?? ''));
+        $dayValue = trim((string) ($this->birthDay ?? ''));
+        $yearValue = trim((string) ($this->birthYear ?? ''));
+
+        $month = is_numeric($monthValue) ? (int) $monthValue : 0;
+        $day = ctype_digit($dayValue) ? (int) $dayValue : 0;
+        $year = is_numeric($yearValue) ? (int) $yearValue : 0;
+
+        $monthIsValid = is_numeric($monthValue) && in_array(
+            str_pad((string) $month, 2, '0', STR_PAD_LEFT),
+            array_column($this->birthMonthsList, 'key'),
+            true
+        );
+        $dayIsValid = ctype_digit($dayValue) && $day >= 1 && $day <= 31;
+        $yearIsValid = in_array($yearValue, array_column($this->birthYearsList, 'key'), true);
+        $isValid = true;
+
+        foreach ([
+            'birthMonth' => [$monthValue, $monthIsValid, 'labels.month'],
+            'birthDay' => [$dayValue, $dayIsValid, 'labels.day'],
+            'birthYear' => [$yearValue, $yearIsValid, 'labels.year'],
+        ] as $field => [$value, $fieldIsValid, $label]) {
+            if ($value === '') {
+                $this->addError($field, __('validation.required', ['attribute' => __( $label )]));
+                $isValid = false;
+            } elseif (! $fieldIsValid) {
+                $this->addError($field, __('auth.birthdate_required'));
+                $isValid = false;
             }
+        }
+
+        if ($isValid && ! checkdate($month, $day, $year)) {
+            $this->addError('birthDay', __('auth.birthdate_required'));
+            $isValid = false;
+        }
+
+        if (! $isValid) {
+            // Keep the existing validation key for consumers while errors are
+            // shown inline on the individual date selectors.
+            $this->addError('birthdateError', __('auth.birthdate_required'));
+        }
+
+        return $isValid;
+    }
+
+    private function clearBirthdateErrors(): void
+    {
+        foreach (['birthMonth', 'birthDay', 'birthYear', 'birthdateError'] as $field) {
+            $this->resetValidation($field);
         }
     }
 
@@ -139,15 +185,23 @@ class Profile extends OnboardingBase
     }
 
     public function updatedBirthMonth($value) {
+        $this->clearBirthdateErrors();
+
         if(is_numeric($value) && in_array($value, ['01','02','03','04','05','06','07','08','09','10','11', '12'])) {
             $this->assignMonthDays();
         }
     }
 
     public function updatedBirthYear($value) {
+        $this->clearBirthdateErrors();
+
         if(is_numeric($value)) {
             $this->assignMonthDays();
         }
+    }
+
+    public function updatedBirthDay($value) {
+        $this->clearBirthdateErrors();
     }
 
     public function saveGender($value) {

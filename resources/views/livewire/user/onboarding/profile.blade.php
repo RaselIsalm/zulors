@@ -22,6 +22,7 @@
                 <div class="grid grid-cols-1 min-[380px]:grid-cols-3 gap-2 mb-2">
                     <div class="cursor-pointer">
                         <x-form.select
+                            name="birthMonth"
                             wire:model.live="birthMonth"
                             :hasLabel="false"
                             :options="$birthMonthsList"
@@ -29,6 +30,7 @@
                     </div>
                     <div class="cursor-pointer" wire:key="select-birth-day-{{ $birthMonth }}">
                         <x-form.select
+                            name="birthDay"
                             wire:model.live="birthDay"
                             :hasLabel="false"
                             :options="$birthDaysList"
@@ -36,17 +38,14 @@
                     </div>
                     <div class="cursor-pointer">
                         <x-form.select
+                            name="birthYear"
                             wire:model.live="birthYear"
                             :hasLabel="false"
                             :options="$birthYearsList"
                         placeholder="{{ __('labels.year') }}"></x-form.select>
                     </div>
                 </div>
-                @error('birthdateError')
-                    <x-form.valerr>
-                        {{ $message }}
-                    </x-form.valerr>
-                @else
+                @if (! $errors->has('birthMonth') && ! $errors->has('birthDay') && ! $errors->has('birthYear'))
                     <x-form.helper-text>
                         {{ __('labels.birthdate_input_helper')}}
                     </x-form.helper-text>
