@@ -63,10 +63,10 @@ function createWorkerHarness() {
         return response;
     }
 
-    async function updateWindow(current = [], next = [], prefetch = true) {
+    async function updateWindow(current = [], next = [], prefetch = true, preferredHeight = 720) {
         let completion = Promise.resolve();
         listeners.get('message')({
-            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch },
+            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch, preferredHeight },
             waitUntil(value) { completion = value; },
         });
         await completion;
@@ -181,12 +181,75 @@ test('a cache window can update priorities without network prefetch', async () =
     assert.deepEqual(worker.requests, []);
 });
 
-test('cross-origin media is left to its media host instead of being prefetched by the app service worker', async () => {
+test('the current and next HLS windows prefetch their network-appropriate starting rung', async () => {
     const worker = createWorkerHarness();
-    const masterUrl = 'https://media.example.test/video/master.m3u8';
+    const current = {
+        master: 'https://media.zulors.com/current/master.m3u8',
+        low: 'https://media.zulors.com/current/360/index.m3u8',
+        hd: 'https://media.zulors.com/current/720/index.m3u8',
+        lowSegment: 'https://media.zulors.com/current/360/segment.ts',
+        hdSegment: 'https://media.zulors.com/current/720/segment.ts',
+    };
+    const next = {
+        master: 'https://media.zulors.com/next/master.m3u8',
+        low: 'https://media.zulors.com/next/360/index.m3u8',
+        hd: 'https://media.zulors.com/next/720/index.m3u8',
+        lowSegment: 'https://media.zulors.com/next/360/segment.ts',
+        hdSegment: 'https://media.zulors.com/next/720/segment.ts',
+    };
+    const master = () => new Response([
+        '#EXTM3U',
+        '#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360',
+        '360/index.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=2700000,RESOLUTION=1280x720',
+        '720/index.m3u8',
+        '',
+    ].join('\n'), { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
+    const variant = () => new Response('#EXTM3U\n#EXTINF:4.0,\nsegment.ts\n#EXT-X-ENDLIST\n', {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+    });
+    for (const item of [current, next]) {
+        worker.responses.set(item.master, () => master(item));
+        worker.responses.set(item.low, variant);
+        worker.responses.set(item.hd, variant);
+        worker.responses.set(item.lowSegment, () => new Response('low segment'));
+        if (item.hdSegment) worker.responses.set(item.hdSegment, () => new Response('HD segment'));
+    }
 
-    await worker.updateWindow([masterUrl], []);
+    await worker.updateWindow([current.master], [next.master], true, 720);
+
+    const requestedUrls = worker.requests.map((request) => request.url);
+    assert.ok(requestedUrls.includes(current.master));
+    assert.ok(requestedUrls.includes(current.hd));
+    assert.ok(requestedUrls.includes(current.hdSegment));
+    assert.ok(!requestedUrls.includes(current.low));
+    assert.ok(requestedUrls.includes(next.hd));
+    assert.ok(requestedUrls.includes(next.hdSegment));
+    assert.ok(!requestedUrls.includes(next.low));
+    assert.ok(await worker.cache.match(new worker.Request(current.hdSegment)));
+});
+
+test('the service worker rejects unrelated cross-origin media cache URLs', async () => {
+    const worker = createWorkerHarness();
+    const untrustedMaster = 'https://media.example.test/video/master.m3u8';
+
+    await worker.updateWindow([untrustedMaster], []);
 
     assert.deepEqual(worker.requests, []);
-    assert.equal(await worker.cache.match(new worker.Request(masterUrl)), undefined);
+    assert.equal(await worker.cache.match(new worker.Request(untrustedMaster)), undefined);
+});
+
+test('immutable cached media is served without a duplicate network request', async () => {
+    const worker = createWorkerHarness();
+    const url = 'https://media.zulors.com/video/segment.ts';
+    worker.responses.set(url, () => new Response('immutable segment', {
+        headers: { 'content-length': '17', 'cache-control': 'public, max-age=31536000, immutable' },
+    }));
+
+    const first = await worker.dispatchFetch(new worker.Request(url));
+    const second = await worker.dispatchFetch(new worker.Request(url));
+
+    assert.equal(await first.text(), 'immutable segment');
+    assert.equal(await second.text(), 'immutable segment');
+    assert.equal(worker.requests.length, 1);
 });

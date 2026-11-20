@@ -1,5 +1,6 @@
 import { buildAdaptiveVideoSource } from '@/kernel/services/media/adaptive-video/index.js';
 import { getNetworkProfileSnapshot, isSlowNetworkProfile } from '@/kernel/services/network/index.js';
+import { getReelPlaybackStartupPolicy } from '@/kernel/services/media/reel-preload-policy.js';
 
 const prefetchedUrls = new Map();
 let queuedPosts = new Map();
@@ -95,6 +96,7 @@ function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}
         type: 'ZULORS_REELS_CACHE_WINDOW',
         current,
         next,
+        preferredHeight: getReelPlaybackStartupPolicy(networkProfile).preferredHeight,
         prefetch: !networkProfile.offline && !networkProfile.saveData
     };
     const worker = serviceWorker.controller;

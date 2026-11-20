@@ -1,14 +1,16 @@
 import Hls from 'hls.js';
-import { getNetworkProfileSnapshot, isSlowNetworkProfile } from '../../network/index.js';
+import { getNetworkProfileSnapshot } from '../../network/index.js';
+import { getReelPlaybackStartupPolicy } from '../reel-preload-policy.js';
 import { canVideoElementPlayNatively, HLS_CONTENT_TYPE } from './index.js';
 
-const hlsOptionsFor = (networkProfile) => ({
+export const hlsOptionsFor = (networkProfile) => ({
 	autoStartLoad: false,
 	enableWorker: true,
 	capLevelToPlayerSize: true,
 	lowLatencyMode: false,
 	backBufferLength: networkProfile?.reelsBackBufferLength ?? 6,
-	startLevel: isSlowNetworkProfile(networkProfile) || networkProfile?.saveData ? 0 : -1,
+	startLevel: -1,
+	abrEwmaDefaultEstimate: getReelPlaybackStartupPolicy(networkProfile).abrEwmaDefaultEstimate,
 	maxBufferLength: networkProfile?.reelsMaxBufferLength ?? 12,
 	maxMaxBufferLength: networkProfile?.reelsMaxMaxBufferLength ?? 18
 });

@@ -1016,6 +1016,7 @@
 						lowLatencyMode: false,
 						backBufferLength: state.networkProfile.reelsBackBufferLength,
 						startLevel: preloadPolicy.value.startLevel,
+						abrEwmaDefaultEstimate: preloadPolicy.value.abrEwmaDefaultEstimate,
 						maxBufferLength: preloadPolicy.value.maxBufferLength,
 						maxMaxBufferLength: preloadPolicy.value.maxMaxBufferLength
 					});

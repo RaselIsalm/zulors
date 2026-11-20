@@ -9,6 +9,7 @@ const navigationTimeoutMs = 850;
 const mediaCacheMaxBytes = 80 * 1024 * 1024;
 const mediaCacheMaxEntries = 160;
 const mediaCacheMaxSingleBytes = 25 * 1024 * 1024;
+const trustedMediaOrigin = 'https://media.zulors.com';
 let reelCachePriorityUrls = new Map();
 let hlsDescendantPriorityUrls = new Map();
 
@@ -172,7 +173,9 @@ const mediaPriorityForUrl = (url) => Math.max(
 const normalizeCachePriorityUrl = (value) => {
     try {
         const url = new URL(String(value || ''), self.location.origin);
-        if(! ['http:', 'https:'].includes(url.protocol) || url.origin !== self.location.origin || url.username || url.password) {
+        if(! ['http:', 'https:'].includes(url.protocol)
+            || (url.origin !== self.location.origin && url.origin !== trustedMediaOrigin)
+            || url.username || url.password) {
             return null;
         }
         return url.href;
@@ -415,7 +418,7 @@ const cacheMediaResource = async (url, priority) => {
     return prefetchPromise;
 };
 
-const prefetchHlsPlayback = async (url, priority) => {
+const prefetchHlsPlayback = async (url, priority, preferredHeight = 0) => {
     const masterResponse = await cacheMediaResource(url, priority);
 
     if(! masterResponse?.ok) {
@@ -425,12 +428,12 @@ const prefetchHlsPlayback = async (url, priority) => {
     try {
         const masterText = await masterResponse.clone().text();
         const lines = masterText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-        let expectVariant = false;
-        let variantUrl = null;
+        let streamAttributes = null;
+        const variants = [];
 
         for(const line of lines) {
             if(line.startsWith('#EXT-X-STREAM-INF')) {
-                expectVariant = true;
+                streamAttributes = line.slice(line.indexOf(':') + 1);
                 continue;
             }
 
@@ -438,11 +441,21 @@ const prefetchHlsPlayback = async (url, priority) => {
                 continue;
             }
 
-            if(expectVariant) {
-                variantUrl = normalizeCachePriorityUrl(new URL(line, url).href);
-                break;
+            if(streamAttributes) {
+                const variantUrl = normalizeCachePriorityUrl(new URL(line, url).href);
+                const resolution = streamAttributes.match(/(?:^|,)\s*RESOLUTION=\d+x(\d+)/i);
+                if(variantUrl) {
+                    variants.push({ url: variantUrl, height: Number(resolution?.[1] || 0) });
+                }
+                streamAttributes = null;
             }
         }
+
+        const underTarget = variants.filter((variant) => variant.height > 0 && preferredHeight > 0 && variant.height <= preferredHeight);
+        const selectedVariant = underTarget.sort((left, right) => right.height - left.height)[0]
+            || variants.filter((variant) => variant.height > 0).sort((left, right) => left.height - right.height)[0]
+            || variants[0];
+        const variantUrl = selectedVariant?.url || null;
 
         if(! variantUrl) {
             const firstSegment = lines.find((line) => !line.startsWith('#'));
@@ -477,14 +490,14 @@ const prefetchHlsPlayback = async (url, priority) => {
     }
 };
 
-const prefetchHlsWindow = async (current = [], next = []) => {
+const prefetchHlsWindow = async (current = [], next = [], preferredHeight = 720) => {
     const orderedUrls = [
         ...current.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 3]),
         ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 2]),
     ];
 
     for(const [url, priority] of orderedUrls) {
-        await prefetchHlsPlayback(url, priority);
+        await prefetchHlsPlayback(url, priority, Number(preferredHeight));
     }
 };
 
@@ -496,6 +509,16 @@ const mediaStaleWhileRevalidate = async (request) => {
 
     const cache = await caches.open(mediaCacheName);
     const cachedResponse = await cache.match(request);
+    if(cachedResponse) {
+        await rememberHlsDescendantPriorities(request.url, cachedResponse, mediaPriorityForUrl(request.url));
+        rememberMediaMeta(cache, request, cachedResponse.clone()).catch(() => {});
+
+        const cacheControl = cachedResponse.headers.get('cache-control') || '';
+        if(/\bimmutable\b/i.test(cacheControl) && /(?:^|,)\s*max-age=\d+/i.test(cacheControl)) {
+            return cachedResponse;
+        }
+    }
+
     const refreshPromise = fetch(request)
         .then(async (response) => {
             await rememberHlsDescendantPriorities(request.url, response, mediaPriorityForUrl(request.url));
@@ -511,9 +534,6 @@ const mediaStaleWhileRevalidate = async (request) => {
         .catch(() => null);
 
     if(cachedResponse) {
-        await rememberHlsDescendantPriorities(request.url, cachedResponse, mediaPriorityForUrl(request.url));
-        rememberMediaMeta(cache, request, cachedResponse.clone()).catch(() => {});
-
         return cachedResponse;
     }
 
@@ -566,7 +586,7 @@ self.addEventListener('message', (event) => {
         });
         const prefetchPlayback = event.data?.prefetch === false
             ? Promise.resolve()
-            : prefetchHlsWindow(event.data?.current, event.data?.next);
+            : prefetchHlsWindow(event.data?.current, event.data?.next, event.data?.preferredHeight);
 
         event.waitUntil?.(Promise.all([updatePriorities, prefetchPlayback]));
     }

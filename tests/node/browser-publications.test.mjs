@@ -55,6 +55,24 @@ test('quota failure rejects enqueue with no queued success', async () => {
     assert.equal(manager.rows.length, 0);
 });
 
+test('InvalidBlob storage retries with a materialized Blob and keeps the selected bytes', async () => {
+    const manager = makeManager(async () => {});
+    const enqueue = manager.db.enqueue.bind(manager.db);
+    let attempts = 0;
+    manager.db.enqueue = async (...args) => {
+        attempts++;
+        if (attempts === 1) throw new DOMException('Failed to write blobs (InvalidBlob)', 'DataCloneError');
+        return enqueue(...args);
+    };
+
+    const row = await queued(manager);
+    const file = await manager.db.file(`${row.key}:${row.descriptor.items[0].client_uid}`);
+
+    assert.equal(attempts, 2);
+    assert.equal(await file.text(), 'test');
+    assert.equal(file.type, 'image/png');
+});
+
 test('feature disabled, unsupported privacy and GIF cannot enter the new path', async () => {
     const manager = makeManager(async () => {});
     manager.capability = { ...capability, enabled: false };

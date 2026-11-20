@@ -29,13 +29,17 @@ deployments run this check before promoting a release.
 
 Feed cards render the thumbnail first and mount players within 500 pixels of
 the viewport. Feed HLS loads only after the playback arbiter selects a visible
-video. The service worker caches same-origin media in its bounded media cache;
-cross-origin HLS on `media.zulors.com` is loaded by the active player because
-the app service worker cannot serve Cache Storage entries to a separate media
-origin. It skips network prefetch while offline or using Data Saver; direct MP4
-sources are never downloaded in full just to warm the cache.
+video. The service worker caches app-origin media and HLS objects from the
+allowlisted `media.zulors.com` origin in its bounded media cache. It warms the
+current and next videos' network-appropriate starting rendition and first
+segment. Immutable cached playlists and segments are served without an extra
+revalidation request. It skips network
+prefetch while offline or using Data Saver; direct MP4 sources are never
+downloaded in full just to warm the cache.
 Native playback uses metadata preloading. Reels keep the next rendition and
-buffer bounded. Active playback can adapt through the full ladder; off-screen
+buffer bounded. Active playback starts near 720p when the network estimate can
+support it, then adapts through the full ladder when measured throughput
+requires it; off-screen
 players pause and release their buffered source, and the feed playback arbiter
 allows one visible video to play at a time. These changes shorten startup when
 the prefetched response is available, but cannot guarantee zero delay on slow

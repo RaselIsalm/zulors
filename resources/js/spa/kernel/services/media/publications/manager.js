@@ -9,6 +9,18 @@ const identity = value => value == null ? null : String(value);
 const clientUid = row => identity(row.client_uid ?? row.descriptor?.client_uid ?? row.publication?.client_uid);
 const serverId = row => identity(row.server_id ?? row.publication?.id ?? row.id);
 const samePublication = (a, b) => Boolean((clientUid(a) && clientUid(a) === clientUid(b)) || (serverId(a) && serverId(a) === serverId(b)));
+const isInvalidBlobStorageError = error => /invalidblob|failed to write blobs/i.test(`${error?.name || ''} ${error?.message || error || ''}`);
+const MAX_INVALID_BLOB_RETRY_BYTES = 128 * 1024 * 1024;
+
+const materializeBlobFiles = async files => {
+    if (files.reduce((total, file) => total + file.blob.size, 0) > MAX_INVALID_BLOB_RETRY_BYTES) {
+        throw new Error('This media is too large for this device’s browser storage fallback.');
+    }
+    return Promise.all(files.map(async item => {
+        const bytes = await item.blob.arrayBuffer();
+        return { key: item.key, blob: new Blob([bytes], { type: item.blob.type || '' }) };
+    }));
+};
 
 export class PublicationManager {
     constructor({ request, db = new PublicationDatabase(), bridge = new NativePublicationBridge(), transfer = transferItem, host = globalThis.window, locks = globalThis.navigator?.locks } = {}) {
@@ -146,10 +158,23 @@ export class PublicationManager {
         if (selections.some(item => !(item.file instanceof Blob) || item.file.size !== item.size)) throw new Error('The local media file is unavailable. Select it again.');
         const key = `${account}:${client_uid}`;
         const row = { key, account, client_uid, descriptor: payload, status: 'queued', progress: 0, created_at: Date.now(), updated_at: Date.now(), retry_at: 0 };
+        const files = selections.map(item => ({ key: `${key}:${item.client_uid}`, blob: item.file }));
         try {
-            await this.db.enqueue(row, selections.map(item => ({ key: `${key}:${item.client_uid}`, blob: item.file })));
+            await this.db.enqueue(row, files);
         } catch (error) {
-            throw new Error(error.name === 'QuotaExceededError' ? 'Not enough local storage. Your media is still in the editor. Free some space and publish again.' : `Media could not be saved. Your media is still in the editor. ${error.message}`);
+            if (isInvalidBlobStorageError(error)) {
+                try {
+                    await this.db.enqueue(row, await materializeBlobFiles(files));
+                } catch (retryError) {
+                    const reason = retryError?.name === 'QuotaExceededError'
+                        ? 'There is not enough local storage. Free some space and publish again.'
+                        : retryError?.message || 'Select the file again and try once more.';
+                    throw new Error(`Media could not be saved after the browser storage retry. It is still in the editor. ${reason}`);
+                }
+            }
+            else {
+                throw new Error(error?.name === 'QuotaExceededError' ? 'Not enough local storage. Your media is still in the editor. Free some space and publish again.' : `Media could not be saved. Your media is still in the editor. ${error?.message || 'Unknown storage error.'}`);
+            }
         }
         // No editor may report queued or close before the transaction commits.
         await this.refresh();

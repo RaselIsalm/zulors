@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createAdaptiveVideoPlaybackController } from '../../resources/js/spa/kernel/services/media/adaptive-video/playback.js';
+import { createAdaptiveVideoPlaybackController, hlsOptionsFor } from '../../resources/js/spa/kernel/services/media/adaptive-video/playback.js';
 
 class FakeHls {
     static Events = { ERROR: 'error', LEVEL_SWITCHED: 'level-switched', MEDIA_ATTACHED: 'media-attached' };
@@ -59,7 +59,7 @@ function createVideoElement() {
 const hlsSource = { url: 'https://media.example.test/master.m3u8', type: 'application/vnd.apple.mpegurl', transport: 'hls' };
 const mp4Source = { url: 'https://media.example.test/source.mp4', type: 'video/mp4', transport: 'direct' };
 
-test('adaptive playback starts on a low rendition with bounded buffers for slow networks', () => {
+test('adaptive playback uses a network-aware initial estimate while retaining ABR on slow networks', () => {
     FakeHls.instances = [];
     const video = createVideoElement();
     const controller = createAdaptiveVideoPlaybackController(video, {
@@ -70,10 +70,18 @@ test('adaptive playback starts on a low rendition with bounded buffers for slow 
     controller.attach(hlsSource, mp4Source);
 
     assert.equal(FakeHls.instances[0].options.autoStartLoad, false);
-    assert.equal(FakeHls.instances[0].options.startLevel, 0);
+    assert.equal(FakeHls.instances[0].options.startLevel, -1);
+    assert.equal(FakeHls.instances[0].options.abrEwmaDefaultEstimate, 1_800_000);
     assert.equal(FakeHls.instances[0].options.maxBufferLength, 14);
     assert.ok(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'));
     controller.destroy();
+});
+
+test('normal feed playback starts from an HD-capable bandwidth estimate', () => {
+    const options = hlsOptionsFor({ profile: 'normal' });
+
+    assert.equal(options.startLevel, -1);
+    assert.equal(options.abrEwmaDefaultEstimate, 3_200_000);
 });
 
 test('fatal HLS network errors retry once then fall back to the canonical MP4', () => {
