@@ -172,7 +172,7 @@ const mediaPriorityForUrl = (url) => Math.max(
 const normalizeCachePriorityUrl = (value) => {
     try {
         const url = new URL(String(value || ''), self.location.origin);
-        if(! ['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+        if(! ['http:', 'https:'].includes(url.protocol) || url.origin !== self.location.origin || url.username || url.password) {
             return null;
         }
         return url.href;

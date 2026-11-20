@@ -164,12 +164,14 @@
 				? getDirectPlaybackFallback(props.mediaItem)
 				: null);
 			let playbackController = null;
+			let playbackAttached = false;
 			let hasBeenVisible = false;
 			let playbackSuspended = false;
 			const playbackCandidateId = `mobile-feed-video-${props.postId || 'post'}-${props.mediaId || 'media'}-${Math.random().toString(36).slice(2)}`;
 			const unregisterPlaybackCandidate = registerVideoPlaybackCandidate({
 				id: playbackCandidateId,
 				activate: () => {
+					state.playRequested = true;
 					playVideo();
 				},
 				deactivate: () => {
@@ -181,6 +183,7 @@
 				isMuted: true,
 				isLoaded: false,
 				isPlaying: false,
+				playRequested: false,
 				progressBar: 0,
 				bufferedBar: 0,
 				playbackTime: 0,
@@ -317,7 +320,7 @@
 
 			const syncPlaybackCandidate = () => {
 				updateVideoPlaybackCandidate(playbackCandidateId, {
-					isReady: state.isLoaded && ! state.isScrubbing,
+					isReady: Boolean(playbackSource.value.url) && ! state.isScrubbing,
 					isVisible: Boolean(isIntersecting.value),
 					ratio: intersectionRatio.value,
 					rect: observerEntry.value?.boundingClientRect || null
@@ -334,7 +337,7 @@
 					if(playbackSuspended) {
 						playbackSuspended = false;
 						state.isLoaded = false;
-						playbackController?.resume();
+						playbackAttached = Boolean(playbackController?.resume());
 					}
 					return;
 				}
@@ -346,6 +349,7 @@
 				const resumePosition = Number(videoPlayerRef.value?.currentTime || 0);
 				pauseVideo();
 				playbackController.suspend(resumePosition);
+				playbackAttached = false;
 				playbackSuspended = true;
 				state.isLoaded = false;
 			});
@@ -356,6 +360,7 @@
 				}
 
 				playbackController.setSource(playbackSource.value, directFallbackSource.value);
+				playbackAttached = false;
 				if(playbackSuspended) {
 					return;
 				}
@@ -370,7 +375,7 @@
 					}, { once: true });
 				}
 				state.isLoaded = false;
-				playbackController.attach(playbackSource.value, directFallbackSource.value);
+				syncPlaybackCandidate();
 			});
 
 			watch(() => state.isLoaded, () => {
@@ -386,6 +391,9 @@
 				updatePresentationMetadata();
 				syncProgressFromVideo();
 				syncPlaybackCandidate();
+				if(state.playRequested && isIntersecting.value) {
+					playVideo();
+				}
 			};
 
 			const updatePresentationMetadata = () => {
@@ -411,7 +419,7 @@
 					videoPlayerRef.value.addEventListener('durationchange', handleVideoReady);
 					videoPlayerRef.value.addEventListener('progress', syncBufferedProgress);
 					playbackController = createAdaptiveVideoPlaybackController(videoPlayerRef.value);
-					playbackController.attach(playbackSource.value, directFallbackSource.value);
+					playbackController.setSource(playbackSource.value, directFallbackSource.value);
 					if(videoPlayerRef.value.readyState >= 1) {
 						handleVideoReady();
 					}
@@ -445,32 +453,52 @@
 			}
 
 			const playVideo = () => {
-				if(state.isLoaded && videoPlayerRef.value && ! state.isScrubbing) {
-					if(state.isPlaying && ! videoPlayerRef.value.paused) {
-						return;
-					}
-
-					colibriEventBus.emit('media:pause-all');
-					playbackController?.startLoad(Number(videoPlayerRef.value.currentTime || 0));
-					videoPlayerRef.value.play().then(() => {
-						setMuted();
-						state.isPlaying = true;
-						startWatchSession();
-						startProgressUpdater();
-						startTelemetryTimer();
-					}).catch((error) => {
-						state.isPlaying = false;
-						stopProgressUpdater();
-						stopTelemetryTimer();
-
-						if(error.name === 'NotAllowedError') {
-							console.info('Cannot play video because user has not interacted with the page yet');
-						}
-					});
+				if(! videoPlayerRef.value || state.isScrubbing) {
+					return;
 				}
+
+				state.playRequested = true;
+
+				if(! playbackAttached) {
+					playbackAttached = Boolean(playbackController?.attach(playbackSource.value, directFallbackSource.value));
+					state.isLoaded = false;
+					if(playbackAttached) {
+						playbackController.startLoad(Number(videoPlayerRef.value.currentTime || 0));
+					}
+					return;
+				}
+
+				if(! state.isLoaded) {
+					playbackController?.startLoad(Number(videoPlayerRef.value.currentTime || 0));
+					return;
+				}
+
+				if(state.isPlaying && ! videoPlayerRef.value.paused) {
+					return;
+				}
+
+				colibriEventBus.emit('media:pause-all');
+				state.playRequested = true;
+				playbackController?.startLoad(Number(videoPlayerRef.value.currentTime || 0));
+				videoPlayerRef.value.play().then(() => {
+					setMuted();
+					state.isPlaying = true;
+					startWatchSession();
+					startProgressUpdater();
+					startTelemetryTimer();
+				}).catch((error) => {
+					state.isPlaying = false;
+					stopProgressUpdater();
+					stopTelemetryTimer();
+
+					if(error.name === 'NotAllowedError') {
+						console.info('Cannot play video because user has not interacted with the page yet');
+					}
+				});
 			};
 
 			const pauseVideo = () => {
+				state.playRequested = false;
 				if(videoPlayerRef.value) {
 					if(state.isPlaying || ! videoPlayerRef.value.paused) {
 						flushVideoTelemetry('video_watch');

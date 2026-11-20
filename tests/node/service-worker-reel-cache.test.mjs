@@ -180,3 +180,13 @@ test('a cache window can update priorities without network prefetch', async () =
 
     assert.deepEqual(worker.requests, []);
 });
+
+test('cross-origin media is left to its media host instead of being prefetched by the app service worker', async () => {
+    const worker = createWorkerHarness();
+    const masterUrl = 'https://media.example.test/video/master.m3u8';
+
+    await worker.updateWindow([masterUrl], []);
+
+    assert.deepEqual(worker.requests, []);
+    assert.equal(await worker.cache.match(new worker.Request(masterUrl)), undefined);
+});

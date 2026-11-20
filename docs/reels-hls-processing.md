@@ -28,10 +28,12 @@ reads, HEAD requests, byte ranges, and exposed `Content-Range` headers. Live
 deployments run this check before promoting a release.
 
 Feed cards render the thumbnail first and mount players within 500 pixels of
-the viewport. Feed and Reel lookahead ask the service worker to cache the
-current and next HLS master, first variant playlist, and first segment in its
-bounded media cache. It skips network prefetch while offline or using Data
-Saver; direct MP4 sources are never downloaded in full just to warm the cache.
+the viewport. Feed HLS loads only after the playback arbiter selects a visible
+video. The service worker caches same-origin media in its bounded media cache;
+cross-origin HLS on `media.zulors.com` is loaded by the active player because
+the app service worker cannot serve Cache Storage entries to a separate media
+origin. It skips network prefetch while offline or using Data Saver; direct MP4
+sources are never downloaded in full just to warm the cache.
 Native playback uses metadata preloading. Reels keep the next rendition and
 buffer bounded. Active playback can adapt through the full ladder; off-screen
 players pause and release their buffered source, and the feed playback arbiter

@@ -25,6 +25,12 @@ for(const platform of Object.values(platforms)) {
         assert.match(player.template.content, /preload="metadata"/);
         assert.doesNotMatch(player.template.content, /<video[^>]+(?:src|v-bind:src)=/);
         assert.match(player.script.content, /createAdaptiveVideoPlaybackController/);
+        if(platform === platforms.mobile) {
+            assert.match(player.script.content, /isReady: Boolean\(playbackSource\.value\.url\) && ! state\.isScrubbing/);
+            assert.match(player.script.content, /if\(! playbackAttached\)[\s\S]*playbackController\?\.attach\(playbackSource\.value, directFallbackSource\.value\)/);
+            assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\);[\s\S]*syncPlaybackCandidate\(\);/);
+            assert.doesNotMatch(player.script.content, /playbackController\.attach\(playbackSource\.value, directFallbackSource\.value\);\s*if\(videoPlayerRef\.value\.readyState/);
+        }
     });
 }
 
@@ -37,7 +43,7 @@ for(const platform of Object.values(platforms)) {
     });
 }
 
-test('timeline prefetch keeps image lookahead and warms one bounded HLS playback window', async () => {
+test('timeline prefetch keeps image lookahead and bounds the HLS cache window', async () => {
     const source = (await readFile(new URL('../../resources/js/spa/kernel/services/media-prefetch/index.js', import.meta.url))).toString();
 
     assert.doesNotMatch(source, /createElement\(['"]video['"]\)/);
