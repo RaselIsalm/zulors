@@ -6,6 +6,7 @@
     'options' => [],
     'errorKey' => null,
 ])
+@php($hasError = $errors->has($errorKey ?? $name))
 
 <div class="block">
     @if ($hasLabel)
@@ -41,9 +42,9 @@
                 }
             }"
             class=" cursor-pointer relative {{ (count($options) < 1) ? 'opacity-60 cursor-default' : '' }}">
-            <div @click="isOpen = !isOpen" @click.away="isOpen = false" class="w-full border-2 border-transparent hover:border-brand-900 smoothing overflow-hidden rounded-xl bg-input-pr h-12 flex items-center px-4">
-                <span class="truncate text-lab-sc text-par-m" x-text="selectedLabel"></span>
-                <span class="size-4 text-lab-sc shrink-0 ml-auto">
+            <div @click="isOpen = !isOpen" @click.away="isOpen = false" aria-invalid="{{ $hasError ? 'true' : 'false' }}" class="w-full border-2 {{ $hasError ? 'border-red-900 bg-red-900/5' : 'border-transparent hover:border-brand-900' }} smoothing overflow-hidden rounded-xl bg-input-pr h-12 flex items-center px-4">
+                <span class="truncate {{ $hasError ? 'text-[#FF6367]' : 'text-lab-sc' }} text-par-m" x-text="selectedLabel"></span>
+                <span class="size-4 {{ $hasError ? 'text-[#FF6367]' : 'text-lab-sc' }} shrink-0 ml-auto">
                     <x-ui-icon name="chevron-selector-vertical" type="solid"></x-ui-icon>
                 </span>
             </div>

@@ -71,6 +71,33 @@ class ProfileOnboardingProgressTest extends TestCase
         $this->assertNull($user->fresh()->birth_year);
     }
 
+    public function test_missing_birthdate_shows_inline_errors_on_all_date_selectors(): void
+    {
+        $user = $this->createOnboardingUser([
+            'first_name' => 'Google',
+            'last_name' => 'User',
+        ]);
+        $this->actingAs($user);
+
+        $component = Livewire::test(Profile::class, [
+            'stepIndex' => 0,
+            'stepData' => config('user.onboarding_steps.profile'),
+        ])
+            ->call('submitForm')
+            ->assertHasErrors(['birthMonth', 'birthDay', 'birthYear']);
+
+        $this->assertSame(3, substr_count($component->html(), 'border-red-900 bg-red-900/5'));
+        foreach (['labels.month', 'labels.day', 'labels.year'] as $label) {
+            $this->assertStringContainsString(
+                __('validation.required', ['attribute' => __($label)]),
+                $component->html()
+            );
+        }
+        $this->assertNull($user->fresh()->birth_month);
+        $this->assertNull($user->fresh()->birth_day);
+        $this->assertNull($user->fresh()->birth_year);
+    }
+
     private function createOnboardingUser(array $attributes = []): User
     {
         return User::query()->create(array_merge([
