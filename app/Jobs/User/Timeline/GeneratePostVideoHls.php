@@ -585,7 +585,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             throw new RuntimeException('The encoded HLS rendition has no usable H.264 level.');
         }
 
-        $codecs = ['avc1.'.$codecProfile.str_pad(strtolower(dechex($level)), 2, '0', STR_PAD_LEFT)];
+        $codecs = ['avc1.'.strtolower($codecProfile).str_pad(strtolower(dechex($level)), 2, '0', STR_PAD_LEFT)];
         $audioStream = $streams->audios()->first();
         if ($audioStream) {
             if ($audioStream->get('codec_name') !== 'aac') {
