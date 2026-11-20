@@ -2,6 +2,9 @@
     $bootVariant = $variant ?? 'mobile';
     $bootIsAuthenticated = auth_check();
     $bootAuthUserId = $bootIsAuthenticated ? me()?->id : null;
+    $bootServerAuthUser = $bootIsAuthenticated
+        ? app(\App\Support\Bootstrap\AuthenticatedUserData::class)->from(me())
+        : null;
     $bootCacheKey = $bootVariant === 'desktop'
         ? 'colibri.desktop.bootstrap.v1'
         : 'colibri.mobile.bootstrap.v1';
@@ -30,6 +33,7 @@
         var variant = @json($bootVariant);
         var isAuthenticated = @json($bootIsAuthenticated);
         var authUserId = @json($bootAuthUserId);
+        var serverAuthUser = @json($bootServerAuthUser);
         var cacheKey = @json($bootCacheKey);
         var sharedFeedCacheKey = @json($sharedFeedCacheKey);
         var cacheTtl = @json($bootCacheTtl);
@@ -63,6 +67,7 @@
         // visible to the page request before the WebView sends its cookie on XHR.
         bootState.serverAuthenticated = Boolean(isAuthenticated);
         bootState.serverAuthUserId = authUserId;
+        bootState.serverAuthUser = serverAuthUser;
         bootState.cacheKey = cacheKey;
         bootState.cacheTtl = cacheTtl;
         bootState.cacheMaxAge = cacheMaxAge;
@@ -108,9 +113,27 @@
                 return;
             }
 
+            var bootstrapUser = payload.auth && payload.auth.user ? payload.auth.user : null;
+            var expectedUserId = bootState.serverAuthUserId;
+            var responseMatchesServerUser = Boolean(
+                bootstrapUser &&
+                (expectedUserId === null || expectedUserId === undefined || String(bootstrapUser.id) === String(expectedUserId))
+            );
+
+            if (bootState.serverAuthenticated && !responseMatchesServerUser && bootState.serverAuthUser) {
+                payload = Object.assign({}, payload, {
+                    auth: Object.assign({}, payload.auth || {}, {
+                        status: true,
+                        user: bootState.serverAuthUser
+                    }),
+                    home_feed: null
+                });
+                bootstrapUser = bootState.serverAuthUser;
+            }
+
             bootState.cachedBootstrap = payload;
-            bootState.isAuthenticated = Boolean(payload.auth && payload.auth.user);
-            bootState.authUserId = payload.auth && payload.auth.user ? payload.auth.user.id : null;
+            bootState.isAuthenticated = Boolean(bootstrapUser) || Boolean(bootState.serverAuthenticated);
+            bootState.authUserId = bootstrapUser ? bootstrapUser.id : (bootState.serverAuthenticated ? expectedUserId : null);
 
             if (bootState.isAuthenticated) {
                 bootState.sharedFeed = null;

@@ -48,6 +48,7 @@ class Reset extends Component
         EmailConfirmation::where('email', $this->confirmationData->email)->delete();
 
         Auth::login($this->userData);
+        session()->regenerate();
 
         app(AutoVerifyUserService::class)->verifyIfEnabled($this->userData);
 

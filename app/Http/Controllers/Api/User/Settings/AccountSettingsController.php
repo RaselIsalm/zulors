@@ -280,6 +280,7 @@ class AccountSettingsController extends Controller
         if($accountData && $accountData->id !== $this->me->id) {
             Auth::guard('web')->logout();
             Auth::guard('web')->login($accountData, true);
+            $request->session()->regenerate();
 
             return $this->responseSuccess([
                 'data' => null

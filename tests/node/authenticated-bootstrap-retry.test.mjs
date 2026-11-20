@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import {
     bootstrapHasAuthenticatedUser,
     isExpiredSessionStatus,
+    preserveServerAuthenticatedUser,
     shouldRetryAuthenticatedBootstrap
 } from '../../resources/js/spa/kernel/services/authenticated-bootstrap/index.js';
 
@@ -44,6 +45,42 @@ test('guest pages and the final bootstrap attempt do not retry', () => {
         attemptIndex: 2,
         attemptCount: 3
     }), false);
+});
+
+test('an authenticated server page keeps its user when bootstrap returns a guest payload', () => {
+    const serverAuthUser = { id: 42, username: 'new_user' };
+    const resolvedBootstrap = preserveServerAuthenticatedUser({
+        bootstrapData: { auth: { status: false, user: null }, home_feed: null },
+        serverAuthenticated: true,
+        serverAuthUser,
+        serverAuthUserId: 42
+    });
+
+    assert.equal(resolvedBootstrap.auth.status, true);
+    assert.equal(resolvedBootstrap.auth.user, serverAuthUser);
+    assert.equal(resolvedBootstrap.home_feed, null);
+});
+
+test('an authenticated page never accepts bootstrap data for a different account', () => {
+    const serverAuthUser = { id: 42, username: 'current_user' };
+    const resolvedBootstrap = preserveServerAuthenticatedUser({
+        bootstrapData: { auth: { status: true, user: { id: 17, username: 'stale_user' } } },
+        serverAuthenticated: true,
+        serverAuthUser,
+        serverAuthUserId: 42
+    });
+
+    assert.equal(resolvedBootstrap.auth.user, serverAuthUser);
+});
+
+test('a guest page does not restore cached authenticated state', () => {
+    const resolvedBootstrap = preserveServerAuthenticatedUser({
+        bootstrapData: { auth: { status: false, user: null } },
+        serverAuthenticated: false,
+        serverAuthUser: { id: 42, username: 'old_user' }
+    });
+
+    assert.equal(resolvedBootstrap.auth.user, null);
 });
 
 test('only unauthorized and expired-CSRF responses invalidate the app session', () => {

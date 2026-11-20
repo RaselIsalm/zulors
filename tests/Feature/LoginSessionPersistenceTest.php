@@ -68,13 +68,19 @@ class LoginSessionPersistenceTest extends TestCase
             'type' => UserType::AUTHOR,
         ]);
 
-        Livewire::test(LoginComponent::class)
+        $loginFlow = Livewire::test(LoginComponent::class)
             ->set('authCreds.login', $user->email)
             ->call('submitForm')
-            ->assertSet('loginStep', 2)
+            ->assertSet('loginStep', 2);
+
+        $sessionIdBeforeAuthentication = app('session')->driver()->getId();
+
+        $loginFlow
             ->set('authCreds.password', 'correct-password')
             ->call('submitForm')
             ->assertRedirect(route('user.desktop.index'));
+
+        $this->assertNotSame($sessionIdBeforeAuthentication, app('session')->driver()->getId());
 
         auth()->forgetGuards();
 

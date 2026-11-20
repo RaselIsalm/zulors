@@ -72,8 +72,6 @@ class GoogleAuthController extends Controller
 
         if(! $result['exists']) {
             Auth::guard('web')->login($user, true);
-            request()->session()->regenerate();
-
             app(AutoVerifyUserService::class)->verifyIfEnabled($user);
         }
 

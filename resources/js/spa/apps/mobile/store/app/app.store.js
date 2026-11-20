@@ -9,6 +9,7 @@ import { useAuthStore } from '@M/store/auth/auth.store.js';
 import { useTimelineStore } from '@M/store/timeline/timeline.store.js';
 import {
     isExpiredSessionStatus,
+    preserveServerAuthenticatedUser,
     shouldRetryAuthenticatedBootstrap
 } from '@/kernel/services/authenticated-bootstrap/index.js';
 
@@ -141,11 +142,19 @@ const useAppStore = defineStore('mobile_app_store', {
                         continue;
                     }
 
+                    const resolvedBootstrapData = preserveServerAuthenticatedUser({
+                        bootstrapData: bootstrapData,
+                        serverAuthenticated: serverAuthenticated,
+                        serverAuthUser: window.__zulorsBoot?.serverAuthUser,
+                        serverAuthUserId: window.__zulorsBoot?.serverAuthUserId,
+                        fallbackUser: authStore.userData ?? this.appData?.auth?.user
+                    });
+
                     this.lastBootstrapMeta = {
                         serverTiming: response?.headers?.['server-timing'] ?? null,
                         cacheHeader: response?.headers?.['x-zulors-home-feed-cache'] ?? null
                     };
-                    this.applyBootstrapData(bootstrapData);
+                    this.applyBootstrapData(resolvedBootstrapData);
                     sessionStorage.removeItem('bootstrap-reload-attempted');
                     sessionStorage.removeItem('bootstrap-hard-reload-attempted');
 
@@ -164,6 +173,19 @@ const useAppStore = defineStore('mobile_app_store', {
                     if (isSessionError) {
                         if(serverAuthenticated && isSessionError && attemptIndex < retryDelays.length - 1) {
                             continue;
+                        }
+
+                        const preservedBootstrap = preserveServerAuthenticatedUser({
+                            bootstrapData: this.appData,
+                            serverAuthenticated: serverAuthenticated,
+                            serverAuthUser: window.__zulorsBoot?.serverAuthUser,
+                            serverAuthUserId: window.__zulorsBoot?.serverAuthUserId,
+                            fallbackUser: authStore.userData ?? this.appData?.auth?.user
+                        });
+
+                        if (serverAuthenticated && preservedBootstrap?.auth?.user) {
+                            this.applyBootstrapData(preservedBootstrap);
+                            return true;
                         }
 
                         const cachedUserId = authStore.userData?.id ?? this.appData?.auth?.user?.id ?? window.__zulorsBoot?.authUserId ?? null;

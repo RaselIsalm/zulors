@@ -20,6 +20,7 @@ use App\Models\Post;
 use Illuminate\Support\Str;
 use App\Http\Controllers\Controller;
 use App\Services\Timeline\FeedService;
+use App\Support\Bootstrap\AuthenticatedUserData;
 use Illuminate\Support\Facades\Cache;
 use App\Traits\Http\Api\SupportsApiResponses;
 use App\Http\Resources\User\Timeline\TimelineCollection;
@@ -88,38 +89,7 @@ class BootstrapController extends Controller
     private function getUserData()
     {
         if(auth_check()) {
-            $me = me();
-
-            $userData = [
-                'id' => $me->id,
-                'name' => $me->name,
-                'avatar_url' => $me->avatar_url,
-                'cover_url' => $me->cover_url,
-                'first_name' => $me->first_name,
-                'last_name' => $me->last_name,
-                'caption' => $me->getCaption(),
-                'username' => $me->username,
-                'has_tips' => $me->has_tips,
-                'tips' => $me->tips,
-                'is_master_account' => $me->isMasterAccount(),
-                'is_author' => $me->isAuthor(),
-                'verification' => [
-                    'status' => $me->verified,
-                    'date' => $me->verified_at ? $me->verified_at->getIso() : null
-                ],
-                'meta' => [
-                    'is_admin' => $me->isAdmin(),
-                    'is_root' => $me->isRoot()
-                ]
-            ];
-
-            if($me->isAdmin() || $me->isRoot()) {
-                $userData['meta']['admin'] = [
-                    'url' => route('admin.dash.index'),
-                ];
-            }
-            
-            return $userData;   
+            return app(AuthenticatedUserData::class)->from(me());
         }
         
         return null;

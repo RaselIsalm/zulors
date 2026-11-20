@@ -77,6 +77,7 @@ class Login extends Component
                 $rememberMe = (empty($this->authCreds['remember']) == true) ? false : true;
 
                 Auth::login($this->userData, $rememberMe);
+                session()->regenerate();
 
                 app(AutoVerifyUserService::class)->verifyIfEnabled($this->userData);
 

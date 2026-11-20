@@ -48,6 +48,7 @@ class Login extends Component
         }
 
         Auth::login($userData);
+        session()->regenerate();
 
         return redirect()->route('admin.dash.index');
     }
