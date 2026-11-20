@@ -900,17 +900,19 @@
 					state.playRequested = true;
 					clearBufferRecoveryTimer();
 					clearBufferingGraceTimer();
+					const videoWidth = Number(videoPlayerRef.value?.videoWidth || 0);
 					const videoHeight = Number(videoPlayerRef.value?.videoHeight || 0);
+					const videoShortEdge = videoWidth > 0 && videoHeight > 0 ? Math.min(videoWidth, videoHeight) : videoHeight;
 					const isHlsSource = ! state.forceMp4Fallback && playbackSource.value.transport === 'hls';
-					const renditionHeight = isHlsSource && videoHeight > 0
-						? [240, 360, 480, 720].reduce((closest, candidate) => {
-							return Math.abs(candidate - videoHeight) < Math.abs(closest - videoHeight) ? candidate : closest;
+					const renditionShortEdge = isHlsSource && videoShortEdge > 0
+						? [240, 360, 480, 720, 1080].reduce((closest, candidate) => {
+							return Math.abs(candidate - videoShortEdge) < Math.abs(closest - videoShortEdge) ? candidate : closest;
 						}, 240)
 						: 0;
-					const rendition = isHlsSource ? (renditionHeight ? `${renditionHeight}p` : 'hls') : 'mp4';
+					const rendition = isHlsSource ? (renditionShortEdge ? `${renditionShortEdge}p` : 'hls') : 'mp4';
 					if(rendition !== state.lastReportedRendition) {
 						state.lastReportedRendition = rendition;
-						recordPlaybackMetric('media_rendition', renditionHeight || videoHeight || 1, { rendition: rendition });
+						recordPlaybackMetric('media_rendition', renditionShortEdge || videoShortEdge || 1, { rendition: rendition });
 					}
 					state.hasVisualFrame = true;
 					updatePlaybackReadiness(true);
@@ -1024,6 +1026,7 @@
 						enableWorker: true,
 						capLevelToPlayerSize: true,
 						lowLatencyMode: false,
+						testBandwidth: false,
 						backBufferLength: state.networkProfile.reelsBackBufferLength,
 						startLevel: preloadPolicy.value.startLevel,
 						abrEwmaDefaultEstimate: preloadPolicy.value.abrEwmaDefaultEstimate,
@@ -1041,7 +1044,7 @@
 						}
 
 						hlsManifestReady = true;
-						const preferredLevel = getPreferredReelLevelIndex(instance.levels, preloadPolicy.value.preferredHeight);
+						const preferredLevel = getPreferredReelLevelIndex(instance.levels, preloadPolicy.value.preferredShortEdge);
 						if(preferredLevel >= 0) {
 							instance.startLevel = preferredLevel;
 						}
@@ -1063,10 +1066,13 @@
 					});
 					instance.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
 						syncBuffered();
-						const height = hlsInstance?.levels?.[data?.level]?.height || 0;
-						if(height > 0) {
-							recordPlaybackMetric('media_rendition', height, {
-								rendition: `${height}p`
+						const level = hlsInstance?.levels?.[data?.level];
+						const width = Number(level?.width || 0);
+						const height = Number(level?.height || 0);
+						const shortEdge = width > 0 && height > 0 ? Math.min(width, height) : height;
+						if(shortEdge > 0) {
+							recordPlaybackMetric('media_rendition', shortEdge, {
+								rendition: `${shortEdge}p`
 							});
 						}
 					});

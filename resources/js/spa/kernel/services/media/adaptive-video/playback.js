@@ -8,6 +8,7 @@ export const hlsOptionsFor = (networkProfile) => ({
 	enableWorker: true,
 	capLevelToPlayerSize: true,
 	lowLatencyMode: false,
+	testBandwidth: false,
 	backBufferLength: networkProfile?.reelsBackBufferLength ?? 6,
 	startLevel: -1,
 	abrEwmaDefaultEstimate: getReelPlaybackStartupPolicy(networkProfile).abrEwmaDefaultEstimate,
@@ -184,7 +185,7 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			manifestReady = true;
 			const preferredLevel = getPreferredReelLevelIndex(
 				instance.levels,
-				getReelPlaybackStartupPolicy(getNetworkProfile()).preferredHeight
+				getReelPlaybackStartupPolicy(getNetworkProfile()).preferredShortEdge
 			);
 			if(preferredLevel >= 0) {
 				instance.startLevel = preferredLevel;

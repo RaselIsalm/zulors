@@ -23,7 +23,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public const ENCODING_VERSION = 'v3';
+    public const ENCODING_VERSION = 'v4';
 
     public int $tries = 5;
     public int $timeout = 21600;
@@ -31,24 +31,37 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     public int $uniqueFor = 5400;
 
     private const LADDER = [
-        240 => ['video' => 500000, 'max' => 650000, 'bandwidth' => 800000],
-        360 => ['video' => 950000, 'max' => 1200000, 'bandwidth' => 1400000],
-        480 => ['video' => 1700000, 'max' => 2100000, 'bandwidth' => 2400000],
-        720 => ['video' => 3400000, 'max' => 4000000, 'bandwidth' => 4400000],
-        1080 => ['video' => 6200000, 'max' => 7200000, 'bandwidth' => 7800000],
+        240 => ['video' => 500000, 'max' => 650000],
+        360 => ['video' => 950000, 'max' => 1200000],
+        480 => ['video' => 1700000, 'max' => 2100000],
+        720 => ['video' => 3400000, 'max' => 4000000],
+        1080 => ['video' => 6200000, 'max' => 7200000],
     ];
 
-    public static function renditionHeightsForSource(int $sourceHeight): array
+    public static function renditionShortEdgesForSource(int $sourceWidth, int $sourceHeight): array
     {
+        $sourceShortEdge = min($sourceWidth, $sourceHeight);
+
         return array_values(array_filter(
             array_keys(self::LADDER),
-            static fn (int $height): bool => $height <= $sourceHeight
+            static fn (int $shortEdge): bool => $shortEdge <= $sourceShortEdge
         ));
     }
 
-    public static function renditionProfile(int $height): array
+    public static function renditionDimensions(int $sourceWidth, int $sourceHeight, int $shortEdge): array
     {
-        return self::LADDER[$height] ?? [];
+        $sourceShortEdge = min($sourceWidth, $sourceHeight);
+        $scale = min(1, $shortEdge / max(1, $sourceShortEdge));
+
+        return [
+            'width' => max(2, 2 * (int) round(($sourceWidth * $scale) / 2)),
+            'height' => max(2, 2 * (int) round(($sourceHeight * $scale) / 2)),
+        ];
+    }
+
+    public static function renditionProfile(int $shortEdge): array
+    {
+        return self::LADDER[$shortEdge] ?? [];
     }
 
     public function __construct(public readonly int $mediaId)
@@ -144,9 +157,9 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             $dimensions = $videoUploadService->getVideoDimensions($sourcePath);
             $sourceHeight = (int) ($dimensions['height'] ?? 0);
             $sourceWidth = (int) ($dimensions['width'] ?? 0);
-            $targets = self::renditionHeightsForSource($sourceHeight);
+            $targets = self::renditionShortEdgesForSource($sourceWidth, $sourceHeight);
 
-            if (! $targets || $sourceHeight < 240 || $sourceWidth < 2) {
+            if (! $targets || min($sourceWidth, $sourceHeight) < 240 || $sourceWidth < 2 || $sourceHeight < 2) {
                 $this->markSkipped($media, $sourceSignature, $dimensions);
 
                 return;
@@ -161,36 +174,50 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             $progressBase = 5;
             $progressPerRendition = (int) floor(75 / count($targets));
 
-            foreach ($targets as $height) {
-                $height = (int) $height;
-                $profile = self::LADDER[$height];
-                $renditionDirectory = $workDirectory.'/v'.$height;
+            foreach ($targets as $shortEdge) {
+                $shortEdge = (int) $shortEdge;
+                $profile = self::LADDER[$shortEdge];
+                $renditionDimensions = self::renditionDimensions($sourceWidth, $sourceHeight, $shortEdge);
+                $renditionWidth = $renditionDimensions['width'];
+                $renditionHeight = $renditionDimensions['height'];
+                $renditionDirectory = $workDirectory.'/v'.$shortEdge;
                 @mkdir($renditionDirectory, 0775, true);
                 $playlistPath = $renditionDirectory.'/index.m3u8';
 
-                $failureStage = 'encode_rendition_'.$height;
+                $failureStage = 'encode_rendition_'.$shortEdge;
                 $encodeStartedAt = microtime(true);
                 Log::channel('performance')->info('reel_hls_rendition_encode_started', [
-                    'height' => $height,
+                    'short_edge' => $shortEdge,
                 ]);
-                $this->runRendition($ffmpeg, $sourcePath, $playlistPath, $profile, $height, $workDirectory, $media);
+                $this->runRendition($ffmpeg, $sourcePath, $playlistPath, $profile, $renditionWidth, $renditionHeight, $workDirectory, $media);
+                $measuredBandwidth = $this->measureRenditionBandwidth($playlistPath);
+                $manifestAttributes = $this->renditionManifestAttributes($videoUploadService, $playlistPath);
                 Log::channel('performance')->info('reel_hls_rendition_encode_completed', [
-                    'height' => $height,
+                    'short_edge' => $shortEdge,
+                    'bandwidth' => $measuredBandwidth['peak'],
+                    'average_bandwidth' => $measuredBandwidth['average'],
+                    'frame_rate' => $manifestAttributes['frame_rate'],
                     'duration_seconds' => round(microtime(true) - $encodeStartedAt, 3),
                     'segments' => count(glob($renditionDirectory.'/segment_*.ts') ?: []),
                 ]);
 
-                $failureStage = 'upload_rendition_'.$height;
-                $this->uploadDirectory($outputDisk, $renditionDirectory, $outputPrefix.'/v'.$height, $media, $height);
+                $failureStage = 'upload_rendition_'.$shortEdge;
+                $this->uploadDirectory($outputDisk, $renditionDirectory, $outputPrefix.'/v'.$shortEdge, $media, $shortEdge);
 
-                $width = max(2, (int) (2 * round(($sourceWidth * $height / max(1, $sourceHeight)) / 2)));
                 $renditions[] = [
-                    'height' => $height,
-                    'width' => $width,
+                    'short_edge' => $shortEdge,
+                    'quality' => $shortEdge.'p',
+                    'height' => $renditionHeight,
+                    'width' => $renditionWidth,
                     'state' => 'ready',
-                    'bandwidth' => $profile['bandwidth'],
+                    'bandwidth' => $measuredBandwidth['peak'],
+                    'average_bandwidth' => $measuredBandwidth['average'],
+                    'frame_rate' => $manifestAttributes['frame_rate'],
                 ];
-                $playlistEntries[] = "#EXT-X-STREAM-INF:BANDWIDTH={$profile['bandwidth']},RESOLUTION={$width}x{$height}\nv{$height}/index.m3u8";
+                $playlistEntries[] = [
+                    'short_edge' => $shortEdge,
+                    'playlist' => "#EXT-X-STREAM-INF:BANDWIDTH={$measuredBandwidth['peak']},AVERAGE-BANDWIDTH={$measuredBandwidth['average']},RESOLUTION={$renditionWidth}x{$renditionHeight},FRAME-RATE={$manifestAttributes['frame_rate']},CODECS=\"{$manifestAttributes['codecs']}\"\nv{$shortEdge}/index.m3u8",
+                ];
 
                 $progressBase += $progressPerRendition;
                 $this->updateMetadata($media, function (array $next) use ($progressBase, $renditions, $sourceSignature): array {
@@ -208,7 +235,22 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             }
 
             $masterPath = $workDirectory.'/master.m3u8';
-            file_put_contents($masterPath, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n".implode("\n", $playlistEntries)."\n");
+            $defaultShortEdge = min(720, max(array_column($playlistEntries, 'short_edge')));
+            usort($playlistEntries, static function (array $left, array $right) use ($defaultShortEdge): int {
+                if ($left['short_edge'] === $right['short_edge']) {
+                    return 0;
+                }
+                if ($left['short_edge'] === $defaultShortEdge) {
+                    return -1;
+                }
+                if ($right['short_edge'] === $defaultShortEdge) {
+                    return 1;
+                }
+
+                return $left['short_edge'] <=> $right['short_edge'];
+            });
+            $masterPlaylists = array_column($playlistEntries, 'playlist');
+            file_put_contents($masterPath, "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-INDEPENDENT-SEGMENTS\n".implode("\n", $masterPlaylists)."\n");
             $failureStage = 'upload_master_playlist';
             $this->putFile($outputDisk, $outputPrefix.'/master.m3u8', $masterPath, 'application/vnd.apple.mpegurl');
 
@@ -279,13 +321,13 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         ]);
     }
 
-    private function runRendition(string $ffmpeg, string $sourcePath, string $playlistPath, array $profile, int $height, string $workingDirectory, Media $media): void
+    private function runRendition(string $ffmpeg, string $sourcePath, string $playlistPath, array $profile, int $width, int $height, string $workingDirectory, Media $media): void
     {
         $segmentPattern = dirname($playlistPath).'/segment_%05d.ts';
         $command = [
             $ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', '-i', $sourcePath,
             '-map', '0:v:0', '-map', '0:a:0?',
-            '-vf', 'scale=-2:'.$height.':flags=lanczos',
+            '-vf', 'scale='.$width.':'.$height.':flags=lanczos',
             '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'main',
             '-pix_fmt', 'yuv420p', '-b:v', (string) $profile['video'], '-maxrate', (string) $profile['max'],
             '-bufsize', (string) ($profile['max'] * 2), '-g', '240', '-keyint_min', '1', '-sc_threshold', '0',
@@ -398,7 +440,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function uploadDirectory($disk, string $localDirectory, string $remoteDirectory, Media $media, int $height): void
+    private function uploadDirectory($disk, string $localDirectory, string $remoteDirectory, Media $media, int $shortEdge): void
     {
         $files = glob($localDirectory.'/*') ?: [];
         sort($files);
@@ -430,11 +472,152 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         }
 
         Log::channel('performance')->info('reel_hls_rendition_upload_completed', [
-            'height' => $height,
+            'short_edge' => $shortEdge,
             'file_count' => $uploadedFiles,
             'bytes' => $uploadedBytes,
             'duration_seconds' => round(microtime(true) - $startedAt, 3),
         ]);
+    }
+
+    private function measureRenditionBandwidth(string $playlistPath): array
+    {
+        $playlist = file_get_contents($playlistPath);
+        if ($playlist === false) {
+            throw new RuntimeException('Unable to read the encoded HLS rendition playlist.');
+        }
+
+        $targetDuration = 4.0;
+        $nextSegmentDuration = null;
+        $segments = [];
+
+        foreach (preg_split('/\r?\n/', $playlist) ?: [] as $line) {
+            $line = trim($line);
+
+            if (preg_match('/^#EXT-X-TARGETDURATION:(\d+)/', $line, $matches)) {
+                $targetDuration = max(1.0, (float) $matches[1]);
+                continue;
+            }
+
+            if (preg_match('/^#EXTINF:([0-9]+(?:\.[0-9]+)?)/', $line, $matches)) {
+                $nextSegmentDuration = (float) $matches[1];
+                continue;
+            }
+
+            if ($nextSegmentDuration === null || $line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            $segmentPath = dirname($playlistPath).'/'.$line;
+            $segmentBytes = filesize($segmentPath);
+            if ($segmentBytes === false || $nextSegmentDuration <= 0) {
+                throw new RuntimeException('Unable to measure an encoded HLS segment.');
+            }
+
+            $segments[] = [
+                'bytes' => $segmentBytes,
+                'duration' => $nextSegmentDuration,
+            ];
+            $nextSegmentDuration = null;
+        }
+
+        if ($segments === []) {
+            throw new RuntimeException('The encoded HLS rendition contains no measurable segments.');
+        }
+
+        $totalBytes = array_sum(array_column($segments, 'bytes'));
+        $totalDuration = array_sum(array_column($segments, 'duration'));
+        $averageBandwidth = (int) ceil(($totalBytes * 8) / max(0.001, $totalDuration));
+        $minimumPeakWindow = $targetDuration * 0.5;
+        $maximumPeakWindow = $targetDuration * 1.5;
+        $peakBandwidth = 0.0;
+
+        foreach ($segments as $start => $segment) {
+            $windowBytes = 0;
+            $windowDuration = 0.0;
+
+            for ($index = $start; $index < count($segments); $index++) {
+                $next = $segments[$index];
+                if ($windowDuration + $next['duration'] > $maximumPeakWindow) {
+                    break;
+                }
+
+                $windowBytes += $next['bytes'];
+                $windowDuration += $next['duration'];
+
+                if ($windowDuration >= $minimumPeakWindow) {
+                    $peakBandwidth = max($peakBandwidth, ($windowBytes * 8) / $windowDuration);
+                }
+            }
+        }
+
+        $measuredPeakBandwidth = $peakBandwidth > 0 ? $peakBandwidth : (float) $averageBandwidth;
+
+        return [
+            'peak' => (int) ceil($measuredPeakBandwidth * 1.05),
+            'average' => $averageBandwidth,
+        ];
+    }
+
+    private function renditionManifestAttributes(VideoUploadService $videoUploadService, string $playlistPath): array
+    {
+        $segments = glob(dirname($playlistPath).'/segment_*.ts') ?: [];
+        sort($segments);
+        $segmentPath = $segments[0] ?? null;
+        if (! $segmentPath) {
+            throw new RuntimeException('The encoded HLS rendition contains no segments to inspect.');
+        }
+
+        $streams = $videoUploadService->getFFProbe()->streams($segmentPath);
+        $videoStream = $streams->videos()->first();
+        if (! $videoStream || $videoStream->get('codec_name') !== 'h264') {
+            throw new RuntimeException('The encoded HLS rendition does not contain an H.264 video stream.');
+        }
+
+        $profile = strtolower((string) $videoStream->get('profile'));
+        $codecProfile = match (true) {
+            str_contains($profile, 'baseline') => '42E0',
+            str_contains($profile, 'main') => '4D40',
+            str_contains($profile, 'high') => '6400',
+            default => throw new RuntimeException('The encoded HLS rendition has an unsupported H.264 profile.'),
+        };
+        $level = (int) $videoStream->get('level');
+        if ($level < 1) {
+            throw new RuntimeException('The encoded HLS rendition has no usable H.264 level.');
+        }
+
+        $codecs = ['avc1.'.$codecProfile.str_pad(strtolower(dechex($level)), 2, '0', STR_PAD_LEFT)];
+        $audioStream = $streams->audios()->first();
+        if ($audioStream) {
+            if ($audioStream->get('codec_name') !== 'aac') {
+                throw new RuntimeException('The encoded HLS rendition contains an unsupported audio codec.');
+            }
+
+            $audioProfile = strtolower((string) $audioStream->get('profile'));
+            $codecs[] = 'mp4a.40.'.(str_contains($audioProfile, 'he-aac v2') ? '29' : (str_contains($audioProfile, 'he-aac') ? '5' : '2'));
+        }
+
+        $frameRate = $this->parseFrameRate((string) ($videoStream->get('r_frame_rate') ?: $videoStream->get('avg_frame_rate')));
+        if ($frameRate <= 0) {
+            throw new RuntimeException('The encoded HLS rendition has no usable frame rate.');
+        }
+
+        return [
+            'codecs' => implode(',', $codecs),
+            'frame_rate' => number_format($frameRate, 3, '.', ''),
+        ];
+    }
+
+    private function parseFrameRate(string $value): float
+    {
+        if (str_contains($value, '/')) {
+            [$numerator, $denominator] = array_pad(explode('/', $value, 2), 2, '0');
+
+            return is_numeric($numerator) && is_numeric($denominator) && (float) $denominator !== 0.0
+                ? (float) $numerator / (float) $denominator
+                : 0.0;
+        }
+
+        return is_numeric($value) ? (float) $value : 0.0;
     }
 
     private function putFile($disk, string $path, string $localPath, string $contentType): void

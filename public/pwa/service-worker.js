@@ -418,7 +418,7 @@ const cacheMediaResource = async (url, priority) => {
     return prefetchPromise;
 };
 
-const prefetchHlsPlayback = async (url, priority, preferredHeight = 0) => {
+const prefetchHlsPlayback = async (url, priority, preferredShortEdge = 0) => {
     const masterResponse = await cacheMediaResource(url, priority);
 
     if(! masterResponse?.ok) {
@@ -443,17 +443,19 @@ const prefetchHlsPlayback = async (url, priority, preferredHeight = 0) => {
 
             if(streamAttributes) {
                 const variantUrl = normalizeCachePriorityUrl(new URL(line, url).href);
-                const resolution = streamAttributes.match(/(?:^|,)\s*RESOLUTION=\d+x(\d+)/i);
+                const resolution = streamAttributes.match(/(?:^|,)\s*RESOLUTION=(\d+)x(\d+)/i);
                 if(variantUrl) {
-                    variants.push({ url: variantUrl, height: Number(resolution?.[1] || 0) });
+                    const width = Number(resolution?.[1] || 0);
+                    const height = Number(resolution?.[2] || 0);
+                    variants.push({ url: variantUrl, shortEdge: width > 0 && height > 0 ? Math.min(width, height) : 0 });
                 }
                 streamAttributes = null;
             }
         }
 
-        const underTarget = variants.filter((variant) => variant.height > 0 && preferredHeight > 0 && variant.height <= preferredHeight);
-        const selectedVariant = underTarget.sort((left, right) => right.height - left.height)[0]
-            || variants.filter((variant) => variant.height > 0).sort((left, right) => left.height - right.height)[0]
+        const underTarget = variants.filter((variant) => variant.shortEdge > 0 && preferredShortEdge > 0 && variant.shortEdge <= preferredShortEdge);
+        const selectedVariant = underTarget.sort((left, right) => right.shortEdge - left.shortEdge)[0]
+            || variants.filter((variant) => variant.shortEdge > 0).sort((left, right) => left.shortEdge - right.shortEdge)[0]
             || variants[0];
         const variantUrl = selectedVariant?.url || null;
 
@@ -490,14 +492,14 @@ const prefetchHlsPlayback = async (url, priority, preferredHeight = 0) => {
     }
 };
 
-const prefetchHlsWindow = async (current = [], next = [], preferredHeight = 720) => {
+const prefetchHlsWindow = async (current = [], next = [], preferredShortEdge = 720) => {
     const orderedUrls = [
         ...current.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 3]),
         ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 2]),
     ];
 
     for(const [url, priority] of orderedUrls) {
-        await prefetchHlsPlayback(url, priority, Number(preferredHeight));
+        await prefetchHlsPlayback(url, priority, Number(preferredShortEdge));
     }
 };
 
@@ -586,7 +588,7 @@ self.addEventListener('message', (event) => {
         });
         const prefetchPlayback = event.data?.prefetch === false
             ? Promise.resolve()
-            : prefetchHlsWindow(event.data?.current, event.data?.next, event.data?.preferredHeight);
+            : prefetchHlsWindow(event.data?.current, event.data?.next, event.data?.preferredShortEdge);
 
         event.waitUntil?.(Promise.all([updatePriorities, prefetchPlayback]));
     }

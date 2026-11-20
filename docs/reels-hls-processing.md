@@ -7,10 +7,16 @@ thumbnail, then queues HLS. When HLS processing is enabled,
 adaptive renditions do not re-encode the already lossy playback MP4. If an
 archive is unavailable, it falls back to the playable MP4. The job creates a
 master playlist plus 240p, 360p, 480p, 720p and 1080p renditions, capped at the
-source height, while preserving source frame rate and aspect ratio. The master
-playlist is published only after its segments are uploaded. The HLS encoding
-version changes whenever rendition settings change; `--rebuild --limit=200`
-queues existing outputs for re-encoding from their original archive.
+source short edge so portrait and landscape videos use the same quality labels
+without upscaling. It preserves source aspect ratio and frame rate. Each master
+variant reports its encoded resolution, frame rate, codecs, measured average
+bandwidth and segment-measured peak bandwidth. The default native-HLS variant
+is the highest available rung up to 720p; HLS.js chooses the highest rung at or
+below its network startup target before loading the first segment. Segments begin
+with an aligned keyframe. The master playlist is published only after its
+segments are uploaded. The HLS encoding version changes whenever rendition
+settings change; `--rebuild --limit=200` queues existing outputs for re-encoding
+from their original archive.
 
 The production media pipeline serves these public R2 objects through the
 Cloudflare cached custom domain (`media.zulors.com`). Playlists and segments

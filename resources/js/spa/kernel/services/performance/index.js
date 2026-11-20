@@ -162,7 +162,7 @@ function queueMetric(metric, value, details = {}) {
     }
 
     const rendition = String(details.rendition || '');
-    if (['hls', 'mp4', 'direct', '240p', '360p', '480p', '720p'].includes(rendition)) {
+    if (['hls', 'mp4', 'direct', '240p', '360p', '480p', '720p', '1080p'].includes(rendition)) {
         event.rendition = rendition;
     }
 

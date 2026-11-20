@@ -18,26 +18,35 @@ export function getReelPlaybackStartupPolicy(networkProfile = {}) {
 
     return {
         abrEwmaDefaultEstimate: defaultEstimate,
-        preferredHeight: defaultEstimate >= 7_800_000 ? 1080 : defaultEstimate >= 4_400_000 ? 720 : defaultEstimate >= 2_400_000 ? 480 : defaultEstimate >= 1_400_000 ? 360 : 240,
+        preferredShortEdge: defaultEstimate >= 7_800_000 ? 1080 : defaultEstimate >= 4_400_000 ? 720 : defaultEstimate >= 2_400_000 ? 480 : defaultEstimate >= 1_400_000 ? 360 : 240,
     };
 }
 
-export function getPreferredReelLevelIndex(levels = [], preferredHeight = 720) {
+export function getPreferredReelLevelIndex(levels = [], preferredShortEdge = 720) {
     if(! Array.isArray(levels) || levels.length === 0) {
         return -1;
     }
 
     const usableLevels = levels
-        .map((level, index) => ({ index, height: Number(level?.height || 0), bitrate: Number(level?.maxBitrate || level?.bitrate || 0) }))
-        .filter((level) => level.height > 0);
-    const atOrBelowTarget = usableLevels.filter((level) => level.height <= Number(preferredHeight || 0));
-    usableLevels.sort((left, right) => left.height - right.height || left.bitrate - right.bitrate);
+        .map((level, index) => {
+            const width = Number(level?.width || 0);
+            const height = Number(level?.height || 0);
+
+            return {
+                index,
+                shortEdge: width > 0 && height > 0 ? Math.min(width, height) : height,
+                bitrate: Number(level?.maxBitrate || level?.bitrate || 0),
+            };
+        })
+        .filter((level) => level.shortEdge > 0);
+    const atOrBelowTarget = usableLevels.filter((level) => level.shortEdge <= Number(preferredShortEdge || 0));
+    usableLevels.sort((left, right) => left.shortEdge - right.shortEdge || left.bitrate - right.bitrate);
 
     if(atOrBelowTarget.length === 0) {
         return usableLevels[0]?.index ?? -1;
     }
 
-    atOrBelowTarget.sort((left, right) => left.height - right.height || left.bitrate - right.bitrate);
+    atOrBelowTarget.sort((left, right) => left.shortEdge - right.shortEdge || left.bitrate - right.bitrate);
 
     return atOrBelowTarget[atOrBelowTarget.length - 1]?.index ?? -1;
 }
@@ -52,7 +61,7 @@ export function getReelPreloadPolicy({ active = false, isNext = false, networkPr
         shouldWarm: Boolean(active || prewarmingNext),
         startLevel: -1,
         abrEwmaDefaultEstimate: startupPolicy.abrEwmaDefaultEstimate,
-        preferredHeight: startupPolicy.preferredHeight,
+        preferredShortEdge: startupPolicy.preferredShortEdge,
         autoLevelCapping: -1,
         maxBufferLength: prewarmingNext ? 4 : Number(networkProfile.reelsMaxBufferLength || 16),
         maxMaxBufferLength: prewarmingNext ? 4 : Number(networkProfile.reelsMaxMaxBufferLength || 24),

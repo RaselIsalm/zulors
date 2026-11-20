@@ -23,6 +23,12 @@ class FakeHls {
         FakeHls.instances.push(this);
     }
 
+    get startLevel() { return this._startLevel; }
+    set startLevel(level) {
+        this._startLevel = level;
+        this.calls.push(['startLevel', level]);
+    }
+
     on(name, handler) { this.handlers.set(name, handler); }
     trigger(name, data) { this.handlers.get(name)?.(name, data); }
     attachMedia(video) { this.video = video; this.trigger(FakeHls.Events.MEDIA_ATTACHED); }
@@ -78,11 +84,13 @@ test('adaptive playback uses a network-aware initial estimate while retaining AB
 
     assert.equal(FakeHls.instances[0].options.autoStartLoad, false);
     assert.equal(FakeHls.instances[0].options.startLevel, -1);
+    assert.equal(FakeHls.instances[0].options.testBandwidth, false);
     assert.equal(FakeHls.instances[0].options.abrEwmaDefaultEstimate, 1_800_000);
     assert.equal(FakeHls.instances[0].options.maxBufferLength, 14);
     assert.equal(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'), false);
     FakeHls.instances[0].trigger(FakeHls.Events.MANIFEST_PARSED);
     assert.equal(FakeHls.instances[0].startLevel, 1);
+    assert.ok(FakeHls.instances[0].calls.findIndex(([name]) => name === 'startLevel') < FakeHls.instances[0].calls.findIndex(([name]) => name === 'startLoad'));
     assert.ok(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'));
     controller.destroy();
 });
@@ -91,6 +99,7 @@ test('normal feed playback starts from an HD-capable bandwidth estimate', () => 
     const options = hlsOptionsFor({ profile: 'normal' });
 
     assert.equal(options.startLevel, -1);
+    assert.equal(options.testBandwidth, false);
     assert.equal(options.abrEwmaDefaultEstimate, 5_000_000);
 });
 

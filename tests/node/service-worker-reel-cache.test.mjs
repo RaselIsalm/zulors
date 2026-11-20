@@ -63,10 +63,10 @@ function createWorkerHarness() {
         return response;
     }
 
-    async function updateWindow(current = [], next = [], prefetch = true, preferredHeight = 720) {
+    async function updateWindow(current = [], next = [], prefetch = true, preferredShortEdge = 720) {
         let completion = Promise.resolve();
         listeners.get('message')({
-            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch, preferredHeight },
+            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch, preferredShortEdge },
             waitUntil(value) { completion = value; },
         });
         await completion;
@@ -199,9 +199,9 @@ test('the current and next HLS windows prefetch their network-appropriate starti
     };
     const master = () => new Response([
         '#EXTM3U',
-        '#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360',
+        '#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=360x640',
         '360/index.m3u8',
-        '#EXT-X-STREAM-INF:BANDWIDTH=2700000,RESOLUTION=1280x720',
+        '#EXT-X-STREAM-INF:BANDWIDTH=4400000,RESOLUTION=720x1280',
         '720/index.m3u8',
         '',
     ].join('\n'), { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });

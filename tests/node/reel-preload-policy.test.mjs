@@ -16,7 +16,7 @@ test('the next reel preloads one network-appropriate segment then keeps its buff
         shouldWarm: true,
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
-        preferredHeight: 720,
+        preferredShortEdge: 720,
         autoLevelCapping: -1,
         maxBufferLength: 4,
         maxMaxBufferLength: 4,
@@ -49,7 +49,7 @@ test('the active reel is not capped to the warmup rendition', () => {
     assert.equal(policy.maxBufferLength, 16);
     assert.equal(policy.startLevel, -1);
     assert.equal(policy.abrEwmaDefaultEstimate, 5_000_000);
-    assert.equal(policy.preferredHeight, 720);
+    assert.equal(policy.preferredShortEdge, 720);
 });
 
 test('startup quality follows the available network estimate without pinning slow connections to a tiny rung', () => {
@@ -59,11 +59,11 @@ test('startup quality follows the available network estimate without pinning slo
 
     assert.equal(slow.startLevel, -1);
     assert.equal(slow.abrEwmaDefaultEstimate, 1_800_000);
-    assert.equal(slow.preferredHeight, 360);
+    assert.equal(slow.preferredShortEdge, 360);
     assert.equal(fast.abrEwmaDefaultEstimate, 8_000_000);
-    assert.equal(fast.preferredHeight, 1080);
+    assert.equal(fast.preferredShortEdge, 1080);
     assert.equal(measured.abrEwmaDefaultEstimate, 4_500_000);
-    assert.equal(measured.preferredHeight, 720);
+    assert.equal(measured.preferredShortEdge, 720);
 });
 
 test('the initial HLS rendition selects the highest rung at or below the network target', () => {
@@ -79,6 +79,19 @@ test('the initial HLS rendition selects the highest rung at or below the network
     assert.equal(getPreferredReelLevelIndex(levels, 480), 0);
     assert.equal(getPreferredReelLevelIndex(levels, 180), 1);
     assert.equal(getPreferredReelLevelIndex([], 720), -1);
+});
+
+test('portrait HLS levels select the network target by short edge instead of frame height', () => {
+    const levels = [
+        { width: 240, height: 426, bitrate: 800_000 },
+        { width: 360, height: 640, bitrate: 1_400_000 },
+        { width: 480, height: 854, bitrate: 2_400_000 },
+        { width: 720, height: 1280, bitrate: 4_400_000 },
+        { width: 1080, height: 1920, bitrate: 7_800_000 },
+    ];
+
+    assert.equal(getPreferredReelLevelIndex(levels, 720), 3);
+    assert.equal(getPreferredReelLevelIndex(levels, 1080), 4);
 });
 
 test('activating the warmed reel updates its adaptive estimate and expands the HLS buffer', () => {

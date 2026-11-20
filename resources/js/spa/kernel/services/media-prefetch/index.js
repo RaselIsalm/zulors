@@ -96,7 +96,7 @@ function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}
         type: 'ZULORS_REELS_CACHE_WINDOW',
         current,
         next,
-        preferredHeight: getReelPlaybackStartupPolicy(networkProfile).preferredHeight,
+        preferredShortEdge: getReelPlaybackStartupPolicy(networkProfile).preferredShortEdge,
         prefetch: !networkProfile.offline && !networkProfile.saveData && networkProfile.allowVideoPrefetch !== false
     };
     const worker = serviceWorker.controller;

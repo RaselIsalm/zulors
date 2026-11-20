@@ -29,12 +29,16 @@ class ReelsHlsProcessingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_hls_rendition_ladder_reaches_source_matched_1080p_without_upscaling(): void
+    public function test_hls_rendition_ladder_uses_the_source_short_edge_without_upscaling(): void
     {
-        $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionHeightsForSource(720));
-        $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionHeightsForSource(1080));
-        $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionHeightsForSource(2160));
-        $this->assertSame([], GeneratePostVideoHls::renditionHeightsForSource(180));
+        $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(720, 1280));
+        $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(1280, 720));
+        $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionShortEdgesForSource(1080, 1920));
+        $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionShortEdgesForSource(3840, 2160));
+        $this->assertSame([], GeneratePostVideoHls::renditionShortEdgesForSource(180, 320));
+        $this->assertSame(['width' => 720, 'height' => 1280], GeneratePostVideoHls::renditionDimensions(720, 1280, 720));
+        $this->assertSame(['width' => 1080, 'height' => 1920], GeneratePostVideoHls::renditionDimensions(1080, 1920, 1080));
+        $this->assertSame(['width' => 1280, 'height' => 720], GeneratePostVideoHls::renditionDimensions(1920, 1080, 720));
         $this->assertSame(3400000, GeneratePostVideoHls::renditionProfile(720)['video']);
         $this->assertSame(6200000, GeneratePostVideoHls::renditionProfile(1080)['video']);
     }
@@ -202,7 +206,7 @@ class ReelsHlsProcessingTest extends TestCase
         Storage::disk('r2_final')->assertExists('uploads/posts/source.mp4');
     }
 
-    public function test_original_1080p_source_produces_an_adaptive_1080p_hls_rendition(): void
+    public function test_original_portrait_1080p_source_produces_an_adaptive_1080p_hls_rendition(): void
     {
         $binary = (new \Symfony\Component\Process\ExecutableFinder())->find('ffmpeg');
         if (! $binary) {
@@ -235,8 +239,10 @@ class ReelsHlsProcessingTest extends TestCase
         $disk->makeDirectory(dirname($sourcePath));
         $sourceAbsolutePath = $disk->path($sourcePath);
         (new \Symfony\Component\Process\Process([
-            $binary, '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=24',
-            '-t', '1.5', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an', $sourceAbsolutePath,
+            $binary, '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=24',
+            '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000', '-t', '1.5',
+            '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-b:a', '96k', '-shortest', $sourceAbsolutePath,
         ]))->setTimeout(120)->mustRun();
         $sourceBytes = file_get_contents($sourceAbsolutePath);
         $sourceSize = strlen($sourceBytes);
@@ -259,11 +265,36 @@ class ReelsHlsProcessingTest extends TestCase
 
         $media->refresh();
         $this->assertSame('ready', data_get($media->metadata, 'playback.hls_state'));
-        $this->assertContains(1080, array_column(data_get($media->metadata, 'playback.renditions', []), 'height'));
+        $portrait1080 = collect(data_get($media->metadata, 'playback.renditions', []))->firstWhere('short_edge', 1080);
+        $this->assertSame(1080, $portrait1080['width'] ?? null);
+        $this->assertSame(1920, $portrait1080['height'] ?? null);
         $signature = data_get($media->metadata, 'playback.hls_source_signature');
         $masterPath = 'uploads/posts/videos/'.$media->id.'/hls/'.$signature.'/master.m3u8';
         $disk->assertExists($masterPath);
-        $this->assertStringContainsString('RESOLUTION=1920x1080', $disk->get($masterPath));
+        $master = $disk->get($masterPath);
+        $this->assertStringContainsString('RESOLUTION=1080x1920', $master);
+        $this->assertMatchesRegularExpression('/BANDWIDTH=(\d+),AVERAGE-BANDWIDTH=(\d+),RESOLUTION=1080x1920,FRAME-RATE=\d+\.\d{3},CODECS="avc1\.4d[0-9a-f]{4},mp4a\.40\.2"/', $master);
+        preg_match('/BANDWIDTH=(\d+),AVERAGE-BANDWIDTH=(\d+),RESOLUTION=1080x1920/', $master, $bandwidthMatches);
+        $this->assertSame((int) $portrait1080['bandwidth'], (int) ($bandwidthMatches[1] ?? 0));
+        $this->assertSame((int) $portrait1080['average_bandwidth'], (int) ($bandwidthMatches[2] ?? 0));
+        $this->assertGreaterThanOrEqual($portrait1080['average_bandwidth'], $portrait1080['bandwidth']);
+        preg_match('/#EXT-X-STREAM-INF:[^\r\n]*RESOLUTION=(\d+x\d+)/', $master, $defaultVariant);
+        $this->assertSame('720x1280', $defaultVariant[1] ?? null);
+        $variantPath = 'uploads/posts/videos/'.$media->id.'/hls/'.$signature.'/v1080';
+        $variantPlaylist = $disk->get($variantPath.'/index.m3u8');
+        $this->assertStringContainsString('#EXT-X-INDEPENDENT-SEGMENTS', $variantPlaylist);
+        $this->assertStringContainsString('#EXTINF:', $variantPlaylist);
+        $segmentPath = $variantPath.'/segment_00000.ts';
+        $disk->assertExists($segmentPath);
+
+        $segmentProbe = new \Symfony\Component\Process\Process([
+            (new \Symfony\Component\Process\ExecutableFinder())->find('ffprobe'),
+            '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=key_frame', '-of', 'json',
+            '-read_intervals', '%+0.2', $disk->path($segmentPath),
+        ]);
+        $segmentProbe->setTimeout(30)->mustRun();
+        $firstFrame = data_get(json_decode($segmentProbe->getOutput(), true), 'frames.0.key_frame');
+        $this->assertSame(1, $firstFrame);
         $this->assertSame($sourceSize, $disk->size($originalPath));
     }
 
