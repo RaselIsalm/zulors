@@ -23,7 +23,7 @@ export function getReelPlaybackStartupPolicy(networkProfile = {}) {
 }
 
 export function getReelPreloadPolicy({ active = false, isNext = false, networkProfile = {} } = {}) {
-    const mayPrefetch = !networkProfile.offline && !networkProfile.saveData;
+    const mayPrefetch = !networkProfile.offline && !networkProfile.saveData && networkProfile.allowVideoPrefetch !== false;
     const prewarmingNext = !active && isNext && mayPrefetch;
     const startupPolicy = getReelPlaybackStartupPolicy(networkProfile);
 

@@ -27,6 +27,7 @@ test('the next reel is not prefetched offline or with data saver enabled', () =>
     for (const networkProfile of [
         { profile: 'offline', offline: true },
         { profile: 'very_slow', saveData: true },
+        { profile: 'slow', allowVideoPrefetch: false },
     ]) {
         const policy = getReelPreloadPolicy({ isNext: true, networkProfile });
         assert.equal(policy.prewarmingNext, false);

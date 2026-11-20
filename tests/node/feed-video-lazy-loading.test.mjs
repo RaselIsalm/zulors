@@ -50,5 +50,5 @@ test('timeline prefetch keeps image lookahead and bounds the HLS cache window', 
     assert.match(source, /prefetchImage\(mediaItem\.thumbnail_url\)/);
     assert.match(source, /collectHlsPlaybackUrls\(postsBatch, 2\)/);
     assert.match(source, /type: 'ZULORS_REELS_CACHE_WINDOW'/);
-    assert.match(source, /prefetch: !networkProfile\.offline && !networkProfile\.saveData/);
+    assert.match(source, /prefetch: !networkProfile\.offline && !networkProfile\.saveData && networkProfile\.allowVideoPrefetch !== false/);
 });

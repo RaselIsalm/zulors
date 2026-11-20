@@ -97,7 +97,7 @@ function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}
         current,
         next,
         preferredHeight: getReelPlaybackStartupPolicy(networkProfile).preferredHeight,
-        prefetch: !networkProfile.offline && !networkProfile.saveData
+        prefetch: !networkProfile.offline && !networkProfile.saveData && networkProfile.allowVideoPrefetch !== false
     };
     const worker = serviceWorker.controller;
 
