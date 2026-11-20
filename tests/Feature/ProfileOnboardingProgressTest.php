@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Enums\User\UserRole;
 use App\Enums\User\UserStatus;
 use App\Enums\User\UserType;
+use App\Livewire\User\Onboarding\City;
+use App\Livewire\User\Onboarding\Country;
 use App\Livewire\User\Onboarding\Profile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -96,6 +98,70 @@ class ProfileOnboardingProgressTest extends TestCase
         $this->assertNull($user->fresh()->birth_month);
         $this->assertNull($user->fresh()->birth_day);
         $this->assertNull($user->fresh()->birth_year);
+    }
+
+    public function test_country_is_suggested_from_cloudflare_country_header_and_saved_on_continue(): void
+    {
+        $user = $this->createOnboardingUser();
+        $this->actingAs($user);
+
+        $component = Livewire::withHeaders(['CF-IPCountry' => 'bd'])->test(Country::class, [
+            'stepIndex' => 1,
+            'stepData' => config('user.onboarding_steps.country'),
+        ])
+            ->assertSet('country', 'BD')
+            ->assertSet('countryWasSuggested', true);
+
+        $this->assertNull($user->fresh()->country);
+
+        $component
+            ->call('submitForm')
+            ->assertRedirect(route('user.onboarding.index', 'city'));
+
+        $this->assertSame('BD', $user->fresh()->country);
+    }
+
+    public function test_saved_country_wins_over_ip_suggestion_and_invalid_ip_country_is_ignored(): void
+    {
+        $user = $this->createOnboardingUser(['country' => 'US']);
+        $this->actingAs($user);
+
+        Livewire::withHeaders(['CF-IPCountry' => 'BD'])->test(Country::class, [
+            'stepIndex' => 1,
+            'stepData' => config('user.onboarding_steps.country'),
+        ])
+            ->assertSet('country', 'US')
+            ->assertSet('countryWasSuggested', false);
+
+        $user->update(['country' => null]);
+
+        Livewire::withHeaders(['CF-IPCountry' => 'XX'])->test(Country::class, [
+            'stepIndex' => 1,
+            'stepData' => config('user.onboarding_steps.country'),
+        ])
+            ->assertSet('country', null)
+            ->assertSet('countryWasSuggested', false);
+    }
+
+    public function test_city_is_suggested_from_cloudflare_location_header_and_saved_on_continue(): void
+    {
+        $user = $this->createOnboardingUser(['country' => 'BD']);
+        $this->actingAs($user);
+
+        $component = Livewire::withHeaders(['CF-IPCity' => 'Dhaka'])->test(City::class, [
+            'stepIndex' => 2,
+            'stepData' => config('user.onboarding_steps.city'),
+        ])
+            ->assertSet('city', 'Dhaka')
+            ->assertSet('cityWasSuggested', true);
+
+        $this->assertNull($user->fresh()->city);
+
+        $component
+            ->call('submitForm')
+            ->assertRedirect(route('user.onboarding.index', 'username'));
+
+        $this->assertSame('Dhaka', $user->fresh()->city);
     }
 
     private function createOnboardingUser(array $attributes = []): User

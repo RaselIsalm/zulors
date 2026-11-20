@@ -19,6 +19,8 @@ return array_replace_recursive($apiLabels, [
     'choose_username_helper' => 'Username can contain only Latin letters, numbers, dots, and underscores',
     'birthdate' => 'Date of birth',
     'birthdate_input_helper' => 'Enter your date of birth, even if creating an account for an organization or pet.',
+    'country_ip_suggestion_helper' => 'Suggested from your approximate connection location. You can change it before continuing.',
+    'city_ip_suggestion_helper' => 'Suggested from your approximate connection location. You can edit it before continuing.',
     'day' => 'Day',
     'amount' => 'Amount',
     'provider' => 'Provider',

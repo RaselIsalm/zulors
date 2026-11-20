@@ -4,6 +4,14 @@
             name="city"
             wire:model="city"
         placeholder="{{ __('labels.whats_city') }}"></x-form.text-input>
+
+        @if ($cityWasSuggested)
+            <div class="mt-2">
+                <x-form.helper-text>
+                    {{ __('labels.city_ip_suggestion_helper') }}
+                </x-form.helper-text>
+            </div>
+        @endif
     </div>
 
     <div class="mb-4">

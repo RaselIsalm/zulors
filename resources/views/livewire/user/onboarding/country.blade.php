@@ -1,16 +1,20 @@
 <div>
     <div class="mb-4 cursor-pointer" x-cloak>
         <x-form.select
+            name="country"
             :hasLabel="false"
             :options="$worldCountries"
             wire:model.live="country"
         placeholder="{{ __('labels.whats_country') }}"></x-form.select>
 
-        @error('country')
-            <x-form.valerr>
-                {{ $message }}
-            </x-form.valerr>
+        @if ($countryWasSuggested)
+            <div class="mt-2">
+                <x-form.helper-text>
+                    {{ __('labels.country_ip_suggestion_helper') }}
+                </x-form.helper-text>
+            </div>
         @endif
+
     </div>
 
     <div class="mb-8">

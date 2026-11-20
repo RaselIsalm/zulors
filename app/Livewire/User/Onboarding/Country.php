@@ -11,6 +11,7 @@ class Country extends OnboardingBase
 {
     public string | null $country;
     public array $worldCountries;
+    public bool $countryWasSuggested = false;
 	public int $stepIndex;
     public array $stepData;
 
@@ -24,6 +25,16 @@ class Country extends OnboardingBase
         })->values()->toArray();
 
         $this->country = me()->country;
+
+        if (! filled($this->country)) {
+            $suggestedCountry = strtoupper(trim((string) request()->header('CF-IPCountry')));
+            $countryKeys = array_column($this->worldCountries, 'key');
+
+            if (in_array($suggestedCountry, $countryKeys, true)) {
+                $this->country = $suggestedCountry;
+                $this->countryWasSuggested = true;
+            }
+        }
     }
 
     public function render()
@@ -36,8 +47,11 @@ class Country extends OnboardingBase
         $this->$action($value);
     }
 
-    public function updatedCountry(string $value)
+    public function updatedCountry(?string $value)
     {
+        $this->resetValidation('country');
+        $this->countryWasSuggested = false;
+
         $countryKeys = collect($this->worldCountries)->map(function($item) {
             return $item['key'];
         })->toArray();
@@ -59,13 +73,24 @@ class Country extends OnboardingBase
 
     public function submitForm()
     {
-        if(empty(me()->country)) {
-            $this->addError('country', __('validation.select_or_skip', ['attribute' => __('labels.country')]));
+        $countryKeys = array_column($this->worldCountries, 'key');
+        $validator = Validator::make(['country' => $this->country], [
+            'country' => ['required', 'string', 'size:2', 'uppercase', Rule::in($countryKeys)],
+        ]);
+
+        if ($validator->fails()) {
+            $message = blank($this->country)
+                ? __('validation.select_or_skip', ['attribute' => __('labels.country')])
+                : __('validation.enum', ['attribute' => __('labels.country')]);
+
+            $this->addError('country', $message);
+
+            return;
         }
 
-        else{
-            $this->redirect($this->getNextStepRoute($this->stepIndex));
-        }
+        me()->update(['country' => $this->country]);
+
+        $this->redirect($this->getNextStepRoute($this->stepIndex));
     }
 
     public function skipStep()
