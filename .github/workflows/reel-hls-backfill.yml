@@ -4,10 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Backfill missing HLS encodes or inspect aggregate status.
+        description: Rebuild HLS with the current encoding version, backfill missing encodes, or inspect status.
         required: true
         type: choice
         options:
+          - rebuild
           - backfill
           - status
           - edge-smoke
@@ -49,7 +50,7 @@ jobs:
       - name: Check operation and deploy secrets
         run: |
           test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
-          case "$OPERATION" in backfill|status|edge-smoke|auth-smoke|access-audit|worker-audit) ;; *) exit 1 ;; esac
+          case "$OPERATION" in rebuild|backfill|status|edge-smoke|auth-smoke|access-audit|worker-audit) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
@@ -109,6 +110,11 @@ jobs:
 
           if [[ "$operation" == "backfill" ]]; then
             php artisan media:reconcile-reel-hls --missing-only --limit="$limit" --no-ansi
+            exit
+          fi
+
+          if [[ "$operation" == "rebuild" ]]; then
+            php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
             exit
           fi
 

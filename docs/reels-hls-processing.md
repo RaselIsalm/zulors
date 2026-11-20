@@ -3,11 +3,14 @@
 Post video publication queues FFmpeg optimization after the verified R2 upload.
 The worker archives an exact original in R2, creates an H.264/AAC MP4 and
 thumbnail, then queues HLS. When HLS processing is enabled,
-`GeneratePostVideoHls` reads the current optimized playback MP4 and creates a
+`GeneratePostVideoHls` uses the exact archived upload when it is available, so
+adaptive renditions do not re-encode the already lossy playback MP4. If an
+archive is unavailable, it falls back to the playable MP4. The job creates a
 master playlist plus 240p, 360p, 480p, 720p and 1080p renditions, capped at the
-source height. The master playlist is published only after its segments are
-uploaded. If optimization exhausts its retries, the raw MP4 stays playable and
-HLS can be generated from it as a fallback.
+source height, while preserving source frame rate and aspect ratio. The master
+playlist is published only after its segments are uploaded. The HLS encoding
+version changes whenever rendition settings change; `--rebuild --limit=200`
+queues existing outputs for re-encoding from their original archive.
 
 The production media pipeline serves these public R2 objects through the
 Cloudflare cached custom domain (`media.zulors.com`). Playlists and segments
@@ -41,7 +44,11 @@ buffer bounded. Active playback starts near 720p when the network estimate can
 support it, then adapts through the full ladder when measured throughput
 requires it; off-screen
 players pause and release their buffered source, and the feed playback arbiter
-allows one visible video to play at a time. These changes shorten startup when
+allows one visible video to play at a time. HLS.js waits for the master
+manifest, selects the best rendition at or below the current network target,
+then starts segment loading and continues adaptive switching. This avoids
+starting at the lowest auto-estimated level when the network profile already
+supports HD. These changes shorten startup when
 the prefetched response is available, but cannot guarantee zero delay on slow
 or unavailable networks.
 

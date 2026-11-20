@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createAdaptiveVideoPlaybackController, hlsOptionsFor } from '../../resources/js/spa/kernel/services/media/adaptive-video/playback.js';
 
 class FakeHls {
-    static Events = { ERROR: 'error', LEVEL_SWITCHED: 'level-switched', MEDIA_ATTACHED: 'media-attached' };
+    static Events = { ERROR: 'error', LEVEL_SWITCHED: 'level-switched', MEDIA_ATTACHED: 'media-attached', MANIFEST_PARSED: 'manifest-parsed' };
     static ErrorTypes = { NETWORK_ERROR: 'networkError', MEDIA_ERROR: 'mediaError' };
     static instances = [];
     static isSupported() { return true; }
@@ -13,6 +13,13 @@ class FakeHls {
         this.options = options;
         this.handlers = new Map();
         this.calls = [];
+        this.levels = [
+            { height: 240, bitrate: 700_000 },
+            { height: 360, bitrate: 1_100_000 },
+            { height: 480, bitrate: 2_000_000 },
+            { height: 720, bitrate: 4_000_000 },
+            { height: 1080, bitrate: 7_200_000 },
+        ];
         FakeHls.instances.push(this);
     }
 
@@ -73,6 +80,9 @@ test('adaptive playback uses a network-aware initial estimate while retaining AB
     assert.equal(FakeHls.instances[0].options.startLevel, -1);
     assert.equal(FakeHls.instances[0].options.abrEwmaDefaultEstimate, 1_800_000);
     assert.equal(FakeHls.instances[0].options.maxBufferLength, 14);
+    assert.equal(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'), false);
+    FakeHls.instances[0].trigger(FakeHls.Events.MANIFEST_PARSED);
+    assert.equal(FakeHls.instances[0].startLevel, 1);
     assert.ok(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'));
     controller.destroy();
 });
@@ -81,7 +91,7 @@ test('normal feed playback starts from an HD-capable bandwidth estimate', () => 
     const options = hlsOptionsFor({ profile: 'normal' });
 
     assert.equal(options.startLevel, -1);
-    assert.equal(options.abrEwmaDefaultEstimate, 3_200_000);
+    assert.equal(options.abrEwmaDefaultEstimate, 5_000_000);
 });
 
 test('fatal HLS network errors retry once then fall back to the canonical MP4', () => {
@@ -96,6 +106,7 @@ test('fatal HLS network errors retry once then fall back to the canonical MP4', 
 
     controller.attach(hlsSource, mp4Source);
     const hls = FakeHls.instances[0];
+    hls.trigger(FakeHls.Events.MANIFEST_PARSED);
     hls.trigger(FakeHls.Events.ERROR, { fatal: true, type: FakeHls.ErrorTypes.NETWORK_ERROR });
     assert.equal(hls.calls.filter(([name]) => name === 'startLoad').length, 2);
 
@@ -124,6 +135,7 @@ test('suspended off-screen playback releases HLS and restores its position on re
     assert.equal(FakeHls.instances.length, 2);
     video.dispatch('loadedmetadata');
     assert.equal(video.currentTime, 12.5);
+    FakeHls.instances[1].trigger(FakeHls.Events.MANIFEST_PARSED);
     assert.ok(FakeHls.instances[1].calls.some(([name]) => name === 'startLoad'));
     controller.destroy();
 });

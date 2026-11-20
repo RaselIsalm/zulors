@@ -23,7 +23,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public const ENCODING_VERSION = 'v2';
+    public const ENCODING_VERSION = 'v3';
 
     public int $tries = 5;
     public int $timeout = 21600;
@@ -31,11 +31,11 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     public int $uniqueFor = 5400;
 
     private const LADDER = [
-        240 => ['video' => 350000, 'max' => 450000, 'bandwidth' => 520000],
-        360 => ['video' => 650000, 'max' => 800000, 'bandwidth' => 900000],
-        480 => ['video' => 1000000, 'max' => 1250000, 'bandwidth' => 1400000],
-        720 => ['video' => 2100000, 'max' => 2500000, 'bandwidth' => 2700000],
-        1080 => ['video' => 4800000, 'max' => 5500000, 'bandwidth' => 6000000],
+        240 => ['video' => 500000, 'max' => 650000, 'bandwidth' => 800000],
+        360 => ['video' => 950000, 'max' => 1200000, 'bandwidth' => 1400000],
+        480 => ['video' => 1700000, 'max' => 2100000, 'bandwidth' => 2400000],
+        720 => ['video' => 3400000, 'max' => 4000000, 'bandwidth' => 4400000],
+        1080 => ['video' => 6200000, 'max' => 7200000, 'bandwidth' => 7800000],
     ];
 
     public static function renditionHeightsForSource(int $sourceHeight): array
@@ -44,6 +44,11 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             array_keys(self::LADDER),
             static fn (int $height): bool => $height <= $sourceHeight
         ));
+    }
+
+    public static function renditionProfile(int $height): array
+    {
+        return self::LADDER[$height] ?? [];
     }
 
     public function __construct(public readonly int $mediaId)
@@ -280,10 +285,11 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         $command = [
             $ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', '-i', $sourcePath,
             '-map', '0:v:0', '-map', '0:a:0?',
-            '-vf', 'scale=-2:'.$height,
-            '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'baseline',
+            '-vf', 'scale=-2:'.$height.':flags=lanczos',
+            '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'main',
             '-pix_fmt', 'yuv420p', '-b:v', (string) $profile['video'], '-maxrate', (string) $profile['max'],
-            '-bufsize', (string) ($profile['max'] * 2), '-g', '120', '-keyint_min', '120', '-sc_threshold', '0',
+            '-bufsize', (string) ($profile['max'] * 2), '-g', '240', '-keyint_min', '1', '-sc_threshold', '0',
+            '-force_key_frames', 'expr:gte(t,n_forced*4)',
             '-c:a', 'aac', '-b:a', '96k', '-ac', '2',
             '-progress', 'pipe:1', '-nostats', '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_segment_type', 'mpegts',
             '-hls_flags', 'independent_segments', '-hls_segment_filename', $segmentPattern, $playlistPath,
@@ -311,14 +317,26 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     private function sourceDescriptor(Media $media): array
     {
         $original = (array) data_get($media->metadata, 'original_storage', []);
-        $useOriginalFallback = blank($media->source_path) || blank($media->disk);
+        $originalDisk = (string) ($original['disk'] ?? '');
+        $originalPath = (string) ($original['path'] ?? '');
+        $useOriginal = $originalDisk !== '' && $originalPath !== '';
+
+        if ($useOriginal) {
+            try {
+                $useOriginal = Storage::disk($originalDisk)->exists($originalPath);
+            } catch (Throwable) {
+                $useOriginal = false;
+            }
+        }
+
+        $usePlaybackFallback = ! $useOriginal && (blank($media->source_path) || blank($media->disk));
 
         return [
-            'disk' => (string) ($useOriginalFallback ? ($original['disk'] ?? $media->disk) : $media->disk),
-            'path' => (string) ($useOriginalFallback ? ($original['path'] ?? $media->source_path) : $media->source_path),
-            'size' => (int) ($useOriginalFallback ? ($original['size'] ?? $media->size) : $media->size),
-            'mime' => (string) ($useOriginalFallback ? ($original['mime'] ?? $media->mime) : $media->mime),
-            'extension' => (string) ($useOriginalFallback ? ($original['extension'] ?? $media->extension) : $media->extension),
+            'disk' => (string) ($useOriginal ? $originalDisk : ($usePlaybackFallback ? ($original['disk'] ?? $media->disk) : $media->disk)),
+            'path' => (string) ($useOriginal ? $originalPath : ($usePlaybackFallback ? ($original['path'] ?? $media->source_path) : $media->source_path)),
+            'size' => (int) ($useOriginal ? ($original['size'] ?? $media->size) : ($usePlaybackFallback ? ($original['size'] ?? $media->size) : $media->size)),
+            'mime' => (string) ($useOriginal ? ($original['mime'] ?? $media->mime) : ($usePlaybackFallback ? ($original['mime'] ?? $media->mime) : $media->mime)),
+            'extension' => (string) ($useOriginal ? ($original['extension'] ?? $media->extension) : ($usePlaybackFallback ? ($original['extension'] ?? $media->extension) : $media->extension)),
         ];
     }
 

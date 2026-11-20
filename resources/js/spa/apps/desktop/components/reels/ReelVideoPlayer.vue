@@ -94,7 +94,7 @@
 	import Hls from 'hls.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { buildAdaptiveVideoSource, canVideoElementPlayNatively, getDirectPlaybackFallback } from '@/kernel/services/media/adaptive-video/index.js';
-	import { applyReelPreloadPolicy, getReelPreloadPolicy } from '@/kernel/services/media/reel-preload-policy.js';
+	import { applyReelPreloadPolicy, getPreferredReelLevelIndex, getReelPreloadPolicy } from '@/kernel/services/media/reel-preload-policy.js';
 	import { buildReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 	import { getNetworkProfileSnapshot, isSlowNetworkProfile, subscribeNetworkProfile } from '@/kernel/services/network/index.js';
 	import { createReelPlaybackGestureController } from '@/kernel/services/media/reel-playback-gestures.js';
@@ -186,6 +186,7 @@
 			});
 
 			let hlsInstance = null;
+			let hlsManifestReady = false;
 			let playbackGestureController = null;
 			let unsubscribeNetworkProfile = null;
 			let sponsoredVideoStarted = false;
@@ -310,6 +311,14 @@
 				return Number.isFinite(currentTime) && currentTime > 0
 					? currentTime
 					: -1;
+			};
+
+			const startHlsLoad = (startPosition = hlsStartPosition()) => {
+				if(! hlsInstance || ! hlsManifestReady) {
+					return;
+				}
+
+				hlsInstance.startLoad(startPosition);
 			};
 
 			const clearBufferRecoveryTimer = () => {
@@ -592,6 +601,7 @@
 			};
 
 			const destroyHlsInstance = () => {
+				hlsManifestReady = false;
 				if(hlsInstance) {
 					hlsInstance.destroy();
 					hlsInstance = null;
@@ -696,7 +706,7 @@
 						}
 
 						try {
-							hlsInstance.startLoad(hlsStartPosition());
+							startHlsLoad();
 						}
 						catch(error) {
 							if(! applyFallbackSource()) {
@@ -848,7 +858,7 @@
 
 				if(hlsInstance) {
 					try {
-						hlsInstance.startLoad(hlsStartPosition());
+						startHlsLoad();
 					}
 					catch(error) {
 						if(! applyFallbackSource()) {
@@ -954,7 +964,7 @@
 					case Hls.ErrorTypes.NETWORK_ERROR:
 						if(! applyFallbackSource()) {
 							try {
-								hlsInstance?.startLoad(hlsStartPosition());
+								startHlsLoad();
 							}
 							catch(error) {
 								markPlaybackTerminalError();
@@ -1009,7 +1019,7 @@
 					videoElement.removeAttribute('src');
 					videoElement.load();
 
-					hlsInstance = new Hls({
+					const instance = new Hls({
 						autoStartLoad: false,
 						enableWorker: true,
 						capLevelToPlayerSize: true,
@@ -1020,19 +1030,38 @@
 						maxBufferLength: preloadPolicy.value.maxBufferLength,
 						maxMaxBufferLength: preloadPolicy.value.maxMaxBufferLength
 					});
-					applyReelPreloadPolicy(hlsInstance, preloadPolicy.value);
+					hlsInstance = instance;
+					hlsManifestReady = false;
+					applyReelPreloadPolicy(instance, preloadPolicy.value);
 
-					hlsInstance.on(Hls.Events.ERROR, handleHlsError);
-					hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+					instance.on(Hls.Events.ERROR, handleHlsError);
+					instance.on(Hls.Events.MANIFEST_PARSED, () => {
+						if(hlsInstance !== instance) {
+							return;
+						}
+
+						hlsManifestReady = true;
+						const preferredLevel = getPreferredReelLevelIndex(instance.levels, preloadPolicy.value.preferredHeight);
+						if(preferredLevel >= 0) {
+							instance.startLevel = preferredLevel;
+						}
+
+						if(shouldWarmPlayback.value) {
+							instance.startLoad(hlsStartPosition());
+						}
+						else {
+							instance.stopLoad();
+						}
+
 						handleLoadedMetadata();
 					});
-					hlsInstance.on(Hls.Events.FRAG_BUFFERED, () => {
+					instance.on(Hls.Events.FRAG_BUFFERED, () => {
 						syncBuffered();
 						if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 3.5) {
 							hlsInstance?.stopLoad();
 						}
 					});
-					hlsInstance.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+					instance.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
 						syncBuffered();
 						const height = hlsInstance?.levels?.[data?.level]?.height || 0;
 						if(height > 0) {
@@ -1041,17 +1070,14 @@
 							});
 						}
 					});
-					hlsInstance.attachMedia(videoElement);
-					hlsInstance.on(Hls.Events.MEDIA_ATTACHED, () => {
-						hlsInstance.loadSource(source.url);
+					instance.on(Hls.Events.MEDIA_ATTACHED, () => {
+						if(hlsInstance !== instance) {
+							return;
+						}
 
-						if(shouldWarmPlayback.value) {
-							hlsInstance.startLoad(hlsStartPosition());
-						}
-						else {
-							hlsInstance.stopLoad();
-						}
+						instance.loadSource(source.url);
 					});
+					instance.attachMedia(videoElement);
 
 					return;
 				}
@@ -1081,11 +1107,8 @@
 				if(hlsInstance) {
 					try {
 						applyReelPreloadPolicy(hlsInstance, preloadPolicy.value);
-						if(props.active && preloadPolicy.value.autoLevelCapping < 0) {
-							hlsInstance.nextLevel = -1;
-						}
 						if(shouldWarmPlayback.value) {
-							hlsInstance.startLoad(hlsStartPosition());
+							startHlsLoad();
 						}
 						else {
 							hlsInstance.stopLoad();

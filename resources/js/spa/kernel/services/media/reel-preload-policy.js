@@ -1,9 +1,9 @@
 const DEFAULT_ABR_ESTIMATES = {
-    offline: 500_000,
+    offline: 300_000,
     very_slow: 850_000,
     slow: 1_800_000,
-    normal: 3_200_000,
-    fast: 5_000_000,
+    normal: 5_000_000,
+    fast: 8_000_000,
 };
 
 export function getReelPlaybackStartupPolicy(networkProfile = {}) {
@@ -13,13 +13,33 @@ export function getReelPlaybackStartupPolicy(networkProfile = {}) {
     const defaultEstimate = saveData
         ? DEFAULT_ABR_ESTIMATES.very_slow
         : downlinkMbps > 0
-            ? Math.max(850_000, Math.min(5_000_000, Math.round(downlinkMbps * 750_000)))
+            ? Math.max(850_000, Math.min(8_000_000, Math.round(downlinkMbps * 900_000)))
             : (DEFAULT_ABR_ESTIMATES[profile] || DEFAULT_ABR_ESTIMATES.normal);
 
     return {
         abrEwmaDefaultEstimate: defaultEstimate,
-        preferredHeight: defaultEstimate >= 2_700_000 ? 720 : defaultEstimate >= 1_400_000 ? 480 : defaultEstimate >= 1_200_000 ? 360 : 240,
+        preferredHeight: defaultEstimate >= 7_800_000 ? 1080 : defaultEstimate >= 4_400_000 ? 720 : defaultEstimate >= 2_400_000 ? 480 : defaultEstimate >= 1_400_000 ? 360 : 240,
     };
+}
+
+export function getPreferredReelLevelIndex(levels = [], preferredHeight = 720) {
+    if(! Array.isArray(levels) || levels.length === 0) {
+        return -1;
+    }
+
+    const usableLevels = levels
+        .map((level, index) => ({ index, height: Number(level?.height || 0), bitrate: Number(level?.maxBitrate || level?.bitrate || 0) }))
+        .filter((level) => level.height > 0);
+    const atOrBelowTarget = usableLevels.filter((level) => level.height <= Number(preferredHeight || 0));
+    usableLevels.sort((left, right) => left.height - right.height || left.bitrate - right.bitrate);
+
+    if(atOrBelowTarget.length === 0) {
+        return usableLevels[0]?.index ?? -1;
+    }
+
+    atOrBelowTarget.sort((left, right) => left.height - right.height || left.bitrate - right.bitrate);
+
+    return atOrBelowTarget[atOrBelowTarget.length - 1]?.index ?? -1;
 }
 
 export function getReelPreloadPolicy({ active = false, isNext = false, networkProfile = {} } = {}) {

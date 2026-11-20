@@ -1,6 +1,6 @@
 import Hls from 'hls.js';
 import { getNetworkProfileSnapshot } from '../../network/index.js';
-import { getReelPlaybackStartupPolicy } from '../reel-preload-policy.js';
+import { getPreferredReelLevelIndex, getReelPlaybackStartupPolicy } from '../reel-preload-policy.js';
 import { canVideoElementPlayNatively, HLS_CONTENT_TYPE } from './index.js';
 
 export const hlsOptionsFor = (networkProfile) => ({
@@ -24,6 +24,7 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 	let networkRetries = 0;
 	let mediaRetries = 0;
 	let loadRequested = false;
+	let manifestReady = false;
 	let destroyed = false;
 	let resumePosition = 0;
 	let nativeErrorHandler = null;
@@ -39,6 +40,7 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 		catch(error) {}
 
 		hlsInstance = null;
+		manifestReady = false;
 	};
 
 	const clearVideoSource = () => {
@@ -108,6 +110,14 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 
 		const instance = new HlsClass(hlsOptionsFor(getNetworkProfile()));
 		hlsInstance = instance;
+		manifestReady = false;
+		const startHlsLoad = (position = resumePosition || Number(videoElement.currentTime || 0)) => {
+			if(hlsInstance !== instance || ! manifestReady) {
+				return;
+			}
+
+			instance.startLoad(position);
+		};
 
 		const useFallback = () => {
 			if(hlsInstance !== instance || ! fallbackSource?.url) {
@@ -130,7 +140,7 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			if(data.type === HlsClass.ErrorTypes.NETWORK_ERROR && networkRetries < 1) {
 				networkRetries += 1;
 				try {
-					instance.startLoad(Number(videoElement.currentTime || 0));
+					startHlsLoad(Number(videoElement.currentTime || 0));
 					return;
 				}
 				catch(error) {}
@@ -165,8 +175,23 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			}
 
 			instance.loadSource(nextSource.url);
+		});
+		instance.on(HlsClass.Events.MANIFEST_PARSED, () => {
+			if(hlsInstance !== instance) {
+				return;
+			}
+
+			manifestReady = true;
+			const preferredLevel = getPreferredReelLevelIndex(
+				instance.levels,
+				getReelPlaybackStartupPolicy(getNetworkProfile()).preferredHeight
+			);
+			if(preferredLevel >= 0) {
+				instance.startLevel = preferredLevel;
+			}
+
 			if(loadRequested) {
-				instance.startLoad(resumePosition || Number(videoElement.currentTime || 0));
+				startHlsLoad();
 			}
 		});
 		instance.attachMedia(videoElement);
@@ -186,7 +211,9 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 		startLoad(startPosition = Number(videoElement?.currentTime || 0)) {
 			loadRequested = true;
 			try {
-				hlsInstance?.startLoad(startPosition);
+				if(manifestReady) {
+					hlsInstance?.startLoad(startPosition);
+				}
 			}
 			catch(error) {}
 		},

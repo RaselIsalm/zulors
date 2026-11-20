@@ -93,8 +93,8 @@ return [
             'compress_rate' => (int) env('POST_VIDEO_THUMBNAIL_QUALITY', 84),
         ],
         'video' => [
-            'crf' => (int) env('POST_VIDEO_CRF', 24),
-            'preset' => env('POST_VIDEO_PRESET', 'ultrafast'),
+            'crf' => (int) env('POST_VIDEO_CRF', 21),
+            'preset' => env('POST_VIDEO_PRESET', 'fast'),
             'audio_bitrate' => (int) env('POST_VIDEO_AUDIO_BITRATE', 128),
             'max_width' => (int) env('POST_VIDEO_MAX_WIDTH', 1080),
             'max_height' => (int) env('POST_VIDEO_MAX_HEIGHT', 1920),

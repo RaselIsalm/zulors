@@ -35,6 +35,8 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionHeightsForSource(1080));
         $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionHeightsForSource(2160));
         $this->assertSame([], GeneratePostVideoHls::renditionHeightsForSource(180));
+        $this->assertSame(3400000, GeneratePostVideoHls::renditionProfile(720)['video']);
+        $this->assertSame(6200000, GeneratePostVideoHls::renditionProfile(1080)['video']);
     }
 
     public function test_r2_disks_bound_connection_and_request_timeouts(): void
@@ -53,9 +55,10 @@ class ReelsHlsProcessingTest extends TestCase
         );
     }
 
-    public function test_hls_uses_the_optimized_playback_object_when_an_original_archive_exists(): void
+    public function test_hls_uses_the_exact_original_archive_when_it_exists(): void
     {
         Storage::fake('r2_final');
+        Storage::disk('r2_final')->put('uploads/posts/videos/originals/1/source.mov', 'exact source upload');
         $media = $this->video($this->createPost($this->user()), [
             'original_storage' => [
                 'disk' => 'r2_final',
@@ -71,6 +74,30 @@ class ReelsHlsProcessingTest extends TestCase
         $source = $method->invoke(new GeneratePostVideoHls((int) $media->id), $media);
 
         $this->assertSame('r2_final', $source['disk']);
+        $this->assertSame('uploads/posts/videos/originals/1/source.mov', $source['path']);
+        $this->assertSame(999, $source['size']);
+        $this->assertSame('video/quicktime', $source['mime']);
+        $this->assertSame('mov', $source['extension']);
+    }
+
+    public function test_hls_falls_back_to_the_playback_mp4_if_the_original_archive_is_missing(): void
+    {
+        Storage::fake('r2_final');
+        $media = $this->video($this->createPost($this->user()), [
+            'original_storage' => [
+                'disk' => 'r2_final',
+                'path' => 'uploads/posts/videos/originals/missing/source.mov',
+                'size' => 999,
+                'mime' => 'video/quicktime',
+                'extension' => 'mov',
+            ],
+        ]);
+
+        $method = new \ReflectionMethod(GeneratePostVideoHls::class, 'sourceDescriptor');
+        $method->setAccessible(true);
+        $source = $method->invoke(new GeneratePostVideoHls((int) $media->id), $media);
+
+        $this->assertSame($media->disk, $source['disk']);
         $this->assertSame($media->source_path, $source['path']);
         $this->assertSame((int) $media->size, $source['size']);
         $this->assertSame('mp4', $source['extension']);

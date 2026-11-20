@@ -175,9 +175,30 @@ class VideoUploadService extends AbstractUploadService
                     ];
                 }
 
+                $dimensions = $stream->getDimensions();
+                $width = max(0, (int) $dimensions->getWidth());
+                $height = max(0, (int) $dimensions->getHeight());
+                $rotation = null;
+
+                foreach ((array) $stream->get('side_data_list', []) as $sideData) {
+                    if (is_array($sideData) && is_numeric($sideData['rotation'] ?? null)) {
+                        $rotation = (float) $sideData['rotation'];
+                        break;
+                    }
+                }
+
+                if ($rotation === null) {
+                    $tags = (array) $stream->get('tags', []);
+                    $rotation = is_numeric($tags['rotate'] ?? null) ? (float) $tags['rotate'] : 0.0;
+                }
+
+                if (((int) round($rotation / 90)) % 2 !== 0) {
+                    [$width, $height] = [$height, $width];
+                }
+
                 return [
-                    'width' => max(0, (int) $stream->get('width')),
-                    'height' => max(0, (int) $stream->get('height')),
+                    'width' => $width,
+                    'height' => $height,
                 ];
             }, 1000);
         }
