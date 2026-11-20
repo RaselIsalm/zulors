@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
 
 class ReconcileReelHlsProcessing extends Command
 {
-    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--rebuild : Queue videos without the current HLS encoding version} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
+    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--missing-only : Queue only post videos with missing or failed HLS output} {--rebuild : Queue videos without the current HLS encoding version} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
 
     protected $description = 'Requeue stale, failed, or outdated post-video HLS jobs.';
 
@@ -30,7 +30,19 @@ class ReconcileReelHlsProcessing extends Command
             ->where('status', MediaStatus::PROCESSED->value)
             ->where('metadata->provider', 'r2');
 
-        if ($this->option('rebuild')) {
+        if ($this->option('missing-only')) {
+            $query
+                ->where('mediaable_type', \App\Models\Post::class)
+                ->where(function ($state): void {
+                    $state->whereNull('metadata->playback->hls_state')
+                        ->orWhereIn('metadata->playback->hls_state', ['unset', 'failed']);
+                })
+                ->where(function ($background): void {
+                    $background->whereNull('metadata->background_processing_state')
+                        ->orWhereNotIn('metadata->background_processing_state', ['queued', 'processing']);
+                })
+                ->orderBy('id');
+        } elseif ($this->option('rebuild')) {
             $query
                 ->where('mediaable_type', \App\Models\Post::class)
                 ->where(function ($version): void {

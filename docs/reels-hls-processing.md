@@ -52,6 +52,10 @@ MEDIA_REELS_HLS_TIMEOUT_SECONDS=21600
 MEDIA_REELS_HLS_STALE_AFTER_MINUTES=120
 ```
 
+The Redis `retry_after` value is derived to exceed the HLS job timeout by five
+minutes. Keep that margin if the timeout is changed so Redis cannot reserve a
+long-running encode for a second worker while the first worker is still active.
+
 FFmpeg with `libx264` and AAC support must be available to the Horizon workers
 consuming `media-video-high` (new MP4 optimization) and the configured normal
 video queue (HLS; live legacy alias `media-video`). Post MP4 optimization runs
@@ -61,7 +65,10 @@ the flag off immediately makes
 R2 playback use the MP4 again; Cloudflare Stream media keeps its existing
 playback path. Previously uploaded MP4s are not batch-transcoded by deploy;
 they remain playable and can be queued in bounded batches with
-`--rebuild --limit=200`.
+`--missing-only --limit=200`. This mode queues only post videos whose HLS state
+is missing or failed, and skips rows already queued or processing. Use
+`--rebuild --limit=200` separately when an encoding version change requires
+reprocessing older HLS output.
 
 The additive `MediaResource` metadata reports `playback_state`,
 `background_processing_state`, and `metadata.playback.hls_state` with rendition
@@ -76,6 +83,12 @@ failed jobs remain MP4-playable and can be explicitly requeued with:
 
 ```bash
 php artisan media:reconcile-reel-hls --retry-failed
+```
+
+Queue only missing or failed HLS outputs in bounded batches:
+
+```bash
+php artisan media:reconcile-reel-hls --missing-only --limit=200
 ```
 
 Queue outdated renditions in bounded batches after deploying an encoding

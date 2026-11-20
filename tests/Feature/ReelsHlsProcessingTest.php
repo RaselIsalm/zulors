@@ -45,6 +45,14 @@ class ReelsHlsProcessingTest extends TestCase
         }
     }
 
+    public function test_redis_reservation_timeout_exceeds_the_hls_job_timeout(): void
+    {
+        $this->assertGreaterThanOrEqual(
+            (int) config('media.reels_hls.timeout_seconds') + 300,
+            (int) config('queue.connections.redis.retry_after')
+        );
+    }
+
     public function test_hls_uses_the_optimized_playback_object_when_an_original_archive_exists(): void
     {
         Storage::fake('r2_final');
@@ -341,6 +349,50 @@ class ReelsHlsProcessingTest extends TestCase
         $this->assertSame('queued', data_get($media->fresh()->metadata, 'playback.hls_state'));
         Queue::assertPushedTimes(GeneratePostVideoHls::class, 1);
         Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $media->id);
+    }
+
+    public function test_missing_only_backfill_skips_ready_queued_and_processing_hls_rows(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => true]);
+        $missing = $this->video($this->createPost($this->user()), [
+            'background_processing_state' => 'processed',
+            'playback' => ['hls' => null, 'hls_state' => 'unset'],
+        ]);
+        $failed = $this->video($this->createPost($this->user()), [
+            'background_processing_state' => 'failed',
+            'playback' => ['hls' => null, 'hls_state' => 'failed'],
+        ]);
+        $readyOld = $this->video($this->createPost($this->user()), [
+            'background_processing_state' => 'processed',
+            'playback' => [
+                'hls' => 'https://cdn.example.test/old/master.m3u8',
+                'hls_state' => 'ready',
+                'encoding_version' => 'v1',
+            ],
+        ]);
+        $queued = $this->video($this->createPost($this->user()), [
+            'background_processing_state' => 'queued',
+            'playback' => ['hls' => null, 'hls_state' => 'queued'],
+        ]);
+        $processing = $this->video($this->createPost($this->user()), [
+            'background_processing_state' => 'processing',
+            'playback' => ['hls' => null, 'hls_state' => 'processing'],
+        ]);
+
+        $this->artisan('media:reconcile-reel-hls', ['--missing-only' => true, '--limit' => 2])
+            ->expectsOutput('Requeued 2 reel HLS job(s).')
+            ->assertSuccessful();
+
+        $this->assertSame('queued', data_get($missing->fresh()->metadata, 'playback.hls_state'));
+        $this->assertSame('queued', data_get($failed->fresh()->metadata, 'playback.hls_state'));
+        $this->assertSame('ready', data_get($readyOld->fresh()->metadata, 'playback.hls_state'));
+        $this->assertSame('queued', data_get($queued->fresh()->metadata, 'playback.hls_state'));
+        $this->assertSame('processing', data_get($processing->fresh()->metadata, 'playback.hls_state'));
+        Queue::assertPushedTimes(GeneratePostVideoHls::class, 2);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $missing->id);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $failed->id);
     }
 
     public function test_performance_playback_metrics_discard_identifying_fields(): void

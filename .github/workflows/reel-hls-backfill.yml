@@ -108,7 +108,7 @@ jobs:
           fi
 
           if [[ "$operation" == "backfill" ]]; then
-            php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
+            php artisan media:reconcile-reel-hls --missing-only --limit="$limit" --no-ansi
             exit
           fi
 
@@ -132,11 +132,14 @@ jobs:
             trap 'rm -rf "$work_dir"' EXIT
 
             probe_asset() {
-              local label="$1" url="$2" body="$3" headers="$4" result code ttfb bytes cache
+              local label="$1" url="$2" body="$3" headers="$4" result code ttfb bytes cache content_type cache_control
               result="$(curl -sS --max-time 25 -D "$headers" -o "$body" -w '%{http_code} %{time_starttransfer} %{size_download}' "$url")"
               read -r code ttfb bytes <<< "$result"
               cache="$(awk 'tolower($1)=="cf-cache-status:" {gsub(/\r/, "", $2); value=$2} END {print value ? value : "missing"}' "$headers")"
-              printf '%s http=%s ttfb=%ss bytes=%s cf-cache=%s\n' "$label" "$code" "$ttfb" "$bytes" "$cache"
+              content_type="$(awk 'tolower($1)=="content-type:" {gsub(/\r/, "", $2); value=$2} END {print value ? value : "missing"}' "$headers")"
+              cache_control="$(awk 'tolower($1)=="cache-control:" {$1=""; sub(/^[[:space:]]+/, ""); gsub(/\r/, ""); value=$0} END {gsub(/[[:space:]]+/, "_", value); print value ? value : "missing"}' "$headers")"
+              printf '%s http=%s ttfb=%ss bytes=%s cf-cache=%s content-type=%s cache-control=%s\n' \
+                "$label" "$code" "$ttfb" "$bytes" "$cache" "$content_type" "$cache_control"
               test "$code" = 200
             }
 
@@ -144,10 +147,12 @@ jobs:
             variant_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$work_dir/master.m3u8")"
             test -n "$variant_path"
             variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
-            probe_asset variant-playlist "$variant_url" "$work_dir/variant.m3u8" "$work_dir/variant.headers"
+            probe_asset master-repeat "$master_url" /dev/null "$work_dir/master-repeat.headers"
+            probe_asset variant-first "$variant_url" "$work_dir/variant.m3u8" "$work_dir/variant.headers"
             segment_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$work_dir/variant.m3u8")"
             test -n "$segment_path"
             segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
+            probe_asset variant-repeat "$variant_url" /dev/null "$work_dir/variant-repeat.headers"
             probe_asset segment-first "$segment_url" /dev/null "$work_dir/segment-first.headers"
             probe_asset segment-repeat "$segment_url" /dev/null "$work_dir/segment-repeat.headers"
             exit

@@ -71,7 +71,11 @@ return [
                 (int) env('REDIS_QUEUE_RETRY_AFTER', 3900),
                 (int) env('POST_VIDEO_PROCESSING_TIMEOUT', 3600) + 300,
                 (int) env('MEDIA_VIDEO_TIMEOUT', 3600) + 300,
-                (int) env('MEDIA_VIDEO_HIGH_TIMEOUT', 3600) + 300
+                (int) env('MEDIA_VIDEO_HIGH_TIMEOUT', 3600) + 300,
+                // HLS jobs can run much longer than the regular video worker.
+                // Keep Redis from reserving the same encode for another worker
+                // before its job-level timeout has elapsed.
+                (int) env('MEDIA_REELS_HLS_TIMEOUT_SECONDS', 21600) + 300
             ),
             'block_for' => null,
             'after_commit' => false,
