@@ -23,13 +23,22 @@ for(const platform of Object.values(platforms)) {
         assert.match(publication.template.content, /v-if="isNearViewport"/);
         assert.match(publication.script.content, /rootMargin: '1200px 0px'/);
         assert.match(player.template.content, /preload="metadata"/);
+        assert.match(player.template.content, /state\.playRequested && !state\.isPlaying/);
         assert.doesNotMatch(player.template.content, /<video[^>]+(?:src|v-bind:src)=/);
         assert.match(player.script.content, /createAdaptiveVideoPlaybackController/);
+        assert.match(player.script.content, /const togglePlayback = \(\) => \{\s*if\(state\.isPlaying \|\| state\.playRequested\)/);
+        assert.doesNotMatch(player.script.content, /handleVideoSurfaceClick:[\s\S]{0,450}if\(state\.isLoaded\)/);
+        assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\)/);
+        const mounted = player.script.content.match(/onMounted\(\(\) => \{([\s\S]*?)\n\s*\}\);/)?.[1] || '';
+        assert.doesNotMatch(mounted, /playbackController\.attach\(/);
         if(platform === platforms.mobile) {
             assert.match(player.script.content, /isReady: Boolean\(playbackSource\.value\.url\) && ! state\.isScrubbing/);
             assert.match(player.script.content, /if\(! playbackAttached\)[\s\S]*playbackController\?\.attach\(playbackSource\.value, directFallbackSource\.value\)/);
             assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\);[\s\S]*syncPlaybackCandidate\(\);/);
-            assert.doesNotMatch(player.script.content, /playbackController\.attach\(playbackSource\.value, directFallbackSource\.value\);\s*if\(videoPlayerRef\.value\.readyState/);
+        }
+        else {
+            assert.match(player.script.content, /isReady: Boolean\(playbackSource\.value\.url\) && ! state\.isScrubbing/);
+            assert.match(player.script.content, /if\(! playbackAttached\)[\s\S]*playbackController\?\.attach\(playbackSource\.value, directFallbackSource\.value\)/);
         }
     });
 }

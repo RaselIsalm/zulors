@@ -16,6 +16,9 @@
 		class="size-full object-contain"
 		>
 		</video>
+		<div v-if="state.playRequested && !state.isPlaying" class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center" aria-live="polite" aria-label="Loading video">
+			<div class="size-10 rounded-full border-4 border-white/35 border-t-white animate-spin"></div>
+		</div>
 
 		<div class="from-black/60 to-transparent bg-linear-to-t absolute bottom-0 left-0 right-0 px-2 pb-2 pt-6">
             <div
@@ -61,7 +64,7 @@
 				</div>
                 <PrimaryIconButton
 					v-on:click.stop="togglePlay"
-					v-bind:iconName="state.isPlaying ? 'pause' : 'play'"
+					v-bind:iconName="state.isPlaying || state.playRequested ? 'pause' : 'play'"
                     iconType="solid"
 					buttonColor="text-white"
 					iconSize="icon-small"
@@ -167,6 +170,8 @@
 			let playbackAttached = false;
 			let hasBeenVisible = false;
 			let playbackSuspended = false;
+			let playAttemptId = 0;
+			let playPromisePending = false;
 			const playbackCandidateId = `mobile-feed-video-${props.postId || 'post'}-${props.mediaId || 'media'}-${Math.random().toString(36).slice(2)}`;
 			const unregisterPlaybackCandidate = registerVideoPlaybackCandidate({
 				id: playbackCandidateId,
@@ -463,6 +468,9 @@
 					if(playbackAttached) {
 						playbackController.startLoad(Number(videoPlayerRef.value.currentTime || 0));
 					}
+					else {
+						state.playRequested = false;
+					}
 					return;
 				}
 
@@ -471,32 +479,52 @@
 					return;
 				}
 
-				if(state.isPlaying && ! videoPlayerRef.value.paused) {
+				if((state.isPlaying && ! videoPlayerRef.value.paused) || playPromisePending) {
 					return;
 				}
 
 				colibriEventBus.emit('media:pause-all');
 				state.playRequested = true;
 				playbackController?.startLoad(Number(videoPlayerRef.value.currentTime || 0));
+				const attemptId = ++playAttemptId;
+				playPromisePending = true;
 				videoPlayerRef.value.play().then(() => {
+					if(attemptId !== playAttemptId || ! state.playRequested) {
+						if(! state.playRequested) {
+							videoPlayerRef.value?.pause();
+						}
+						return;
+					}
+
 					setMuted();
 					state.isPlaying = true;
 					startWatchSession();
 					startProgressUpdater();
 					startTelemetryTimer();
 				}).catch((error) => {
+					if(attemptId !== playAttemptId) {
+						return;
+					}
+
 					state.isPlaying = false;
+					state.playRequested = false;
 					stopProgressUpdater();
 					stopTelemetryTimer();
 
 					if(error.name === 'NotAllowedError') {
 						console.info('Cannot play video because user has not interacted with the page yet');
 					}
+				}).finally(() => {
+					if(attemptId === playAttemptId) {
+						playPromisePending = false;
+					}
 				});
 			};
 
 			const pauseVideo = () => {
 				state.playRequested = false;
+				playAttemptId += 1;
+				playPromisePending = false;
 				if(videoPlayerRef.value) {
 					if(state.isPlaying || ! videoPlayerRef.value.paused) {
 						flushVideoTelemetry('video_watch');
@@ -509,6 +537,17 @@
 				state.isPlaying = false;
 				stopProgressUpdater();
 				stopTelemetryTimer();
+			};
+
+			const togglePlayback = () => {
+				if(state.isPlaying || state.playRequested) {
+					setVideoPlaybackManualPause(playbackCandidateId, true);
+					pauseVideo();
+					return;
+				}
+
+				setVideoPlaybackManualPause(playbackCandidateId, false);
+				requestVideoPlayback(playbackCandidateId);
 			};
 
 			const startWatchSession = () => {
@@ -835,28 +874,10 @@
 						return;
 					}
 
-					if(state.isLoaded) {
-						if(state.isPlaying) {
-							setVideoPlaybackManualPause(playbackCandidateId, true);
-							pauseVideo();
-						}
-						else {
-							setVideoPlaybackManualPause(playbackCandidateId, false);
-							requestVideoPlayback(playbackCandidateId);
-						}
-					}
+					togglePlayback();
 				},
 				togglePlay: () => {
-					if(state.isLoaded) {
-						if(state.isPlaying) {
-							setVideoPlaybackManualPause(playbackCandidateId, true);
-							pauseVideo();
-						}
-						else {
-							setVideoPlaybackManualPause(playbackCandidateId, false);
-							requestVideoPlayback(playbackCandidateId);
-						}
-					}
+					togglePlayback();
 				}
 			};
 		},

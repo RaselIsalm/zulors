@@ -24,9 +24,11 @@ test('desktop feed also keeps its loaded source and frame while a video is off-s
 
     assert.match(visibilityWatch, /playbackController\.stopLoad\(\)/);
     assert.doesNotMatch(visibilityWatch, /playbackController\.suspend\(/);
-    assert.match(visibilityWatch, /playbackController\?\.startLoad\(/);
-    assert.match(visibilityWatch, /playbackSourceChangedWhileSuspended[\s\S]*playbackController\?\.resume\(\)/);
+    assert.doesNotMatch(visibilityWatch, /playbackController\?\.startLoad\(/);
+    assert.match(visibilityWatch, /playbackSourceChangedWhileSuspended = false/);
     assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\);[\s\S]*?playbackSourceChangedWhileSuspended = true/);
+    assert.match(player.script.content, /isReady: Boolean\(playbackSource\.value\.url\) && ! state\.isScrubbing/);
+    assert.match(player.script.content, /if\(! playbackAttached\)[\s\S]*playbackController\?\.attach\(playbackSource\.value, directFallbackSource\.value\)/);
 });
 
 test('mobile reels retain a decoded nearby frame and key players by media identity', async () => {
