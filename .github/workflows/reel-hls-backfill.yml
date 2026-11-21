@@ -205,6 +205,8 @@ jobs:
                 probe_asset "media-$target_media_id-${short_edge}p-segment" "$segment_url" "$segment_file" "$work_dir/$target_media_id-$short_edge-segment.headers"
                 if (( short_edge <= 480 )); then
                   decoded_dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$segment_file")"
+                  printf 'sd_probe media_id=%s expected=%s actual=%s average_bitrate=%sbps\n' \
+                    "$target_media_id" "$resolution" "$decoded_dimensions" "$average_bitrate"
                   test "$decoded_dimensions" = "$resolution"
                   ffmpeg -hide_banner -loglevel error -xerror -i "$segment_file" -map 0:v:0 -f null -
                   printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s average_bitrate=%sbps\n' \
