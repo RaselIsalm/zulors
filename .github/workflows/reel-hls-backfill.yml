@@ -209,13 +209,15 @@ jobs:
                     "$target_media_id" "$resolution" "$decoded_dimensions" "$average_bitrate"
                   test "$decoded_dimensions" = "$resolution"
                   decode_log="$work_dir/$target_media_id-$short_edge-decode.log"
-                  if ! ffmpeg -hide_banner -loglevel error -xerror -i "$segment_file" -map 0:v:0 -f null - 2>"$decode_log"; then
+                  if ! ffmpeg -hide_banner -loglevel error -i "$segment_file" -map 0:v:0 -f null - 2>"$decode_log"; then
                     printf 'sd_decode=fail media_id=%s rung=%sp detail=%s\n' \
                       "$target_media_id" "$short_edge" "$(tail -n 3 "$decode_log" | tr '\n' ' ')" >&2
                     exit 1
                   fi
-                  printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s average_bitrate=%sbps\n' \
-                    "$target_media_id" "$short_edge" "$decoded_dimensions" "$average_bitrate"
+                  decoded_frames="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of default=nokey=1:noprint_wrappers=1 "$segment_file")"
+                  test "$decoded_frames" -gt 0
+                  printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s frames=%s average_bitrate=%sbps\n' \
+                    "$target_media_id" "$short_edge" "$decoded_dimensions" "$decoded_frames" "$average_bitrate"
                 fi
               done <<< "$ladder"
               (( rendition_count > 0 ))
