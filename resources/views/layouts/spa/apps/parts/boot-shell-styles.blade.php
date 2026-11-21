@@ -103,6 +103,16 @@
         height: 26px;
     }
 
+    html.zulors-android-app .zulors-boot-shell--mobile .zulors-boot-logo {
+        width: clamp(52px, 16vw, 64px);
+        height: clamp(52px, 16vw, 64px);
+    }
+
+    html.zulors-android-app[data-zulors-boot-cache='hit'] .zulors-boot-shell--mobile .zulors-boot-logo {
+        width: clamp(52px, 16vw, 64px);
+        height: clamp(52px, 16vw, 64px);
+    }
+
     html[data-zulors-boot-cache='hit'] .zulors-boot-corner {
         opacity: 0;
     }

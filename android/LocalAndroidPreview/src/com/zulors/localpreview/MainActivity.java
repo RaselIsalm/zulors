@@ -57,6 +57,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -511,6 +512,21 @@ public class MainActivity extends Activity {
         startupLaunchCover.setClickable(true);
         startupLaunchCover.setFocusable(false);
         startupLaunchCover.setContentDescription("Loading Zulors");
+
+        ImageView launchLogo = new ImageView(this);
+        launchLogo.setImageResource(R.mipmap.ic_splash_foreground);
+        launchLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        launchLogo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        int launchLogoSize = Math.round(144f * getResources().getDisplayMetrics().density);
+        startupLaunchCover.addView(
+            launchLogo,
+            new FrameLayout.LayoutParams(
+                launchLogoSize,
+                launchLogoSize,
+                android.view.Gravity.CENTER
+            )
+        );
+
         rootLayout.addView(
             startupLaunchCover,
             new FrameLayout.LayoutParams(
