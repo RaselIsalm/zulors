@@ -11,8 +11,8 @@ source short edge so portrait and landscape videos use the same quality labels
 without upscaling. It preserves source aspect ratio and frame rate. Each master
 variant reports its encoded resolution, frame rate, codecs, measured average
 bandwidth and segment-measured peak bandwidth. The default native-HLS variant
-is the highest available rung up to 720p; HLS.js chooses the highest rung at or
-below its network startup target before loading the first segment. Two-second
+is the highest available rung up to 720p; HLS.js starts at an HD rung before
+loading the first segment. Two-second
 segments begin with aligned keyframes to reduce the initial download and wait
 for a segment boundary. The master playlist is published only after its
 segments are uploaded. The HLS encoding version changes whenever rendition
@@ -47,16 +47,17 @@ revalidation request. It skips network
 prefetch while offline or using Data Saver; direct MP4 sources are never
 downloaded in full just to warm the cache.
 Native playback uses metadata preloading. Reels keep the next rendition and
-buffer bounded. Active playback starts near 720p when the network estimate can
-support it, then adapts through the full ladder when measured throughput
-requires it. Off-screen feed players pause and stop HLS downloads while keeping
+buffer bounded. Active playback starts at 720p (or the highest available rung
+below it), and at 1080p when the coarse network estimate supports it. The
+browser's Network Information `downlink` hint does not lower the startup rung;
+HLS.js adapts through the full ladder after measuring segment throughput. Reel
+players do not cap HLS by their CSS box dimensions, which can be smaller than
+the video's intended HD resolution. Off-screen feed players pause and stop HLS downloads while keeping
 their attached source and decoded frame. Reels keep loaded nearby sources and
 release them outside the preload window. The feed playback arbiter allows one
 visible video to play at a time. HLS.js waits for the master
-manifest, selects the best rendition at or below the current network target,
-then starts segment loading and continues adaptive switching. This avoids
-starting at the lowest auto-estimated level when the network profile already
-supports HD. These changes shorten startup when
+manifest, selects an HD startup rendition before segment loading, then
+continues adaptive switching as real throughput is measured. These changes shorten startup when
 the prefetched response is available, but cannot guarantee zero delay on slow
 or unavailable networks.
 

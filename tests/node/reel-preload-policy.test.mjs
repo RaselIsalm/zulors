@@ -52,18 +52,21 @@ test('the active reel is not capped to the warmup rendition', () => {
     assert.equal(policy.preferredShortEdge, 720);
 });
 
-test('startup quality follows the available network estimate without pinning slow connections to a tiny rung', () => {
+test('startup quality starts at HD while retaining a higher rung for fast connections', () => {
     const slow = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'slow' } });
     const fast = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'fast' } });
     const measured = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'normal', downlinkMbps: 5 } });
+    const coarseLowDownlink = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'very_slow', downlinkMbps: 1.2 } });
 
     assert.equal(slow.startLevel, -1);
-    assert.equal(slow.abrEwmaDefaultEstimate, 1_800_000);
-    assert.equal(slow.preferredShortEdge, 360);
+    assert.equal(slow.abrEwmaDefaultEstimate, 5_000_000);
+    assert.equal(slow.preferredShortEdge, 720);
     assert.equal(fast.abrEwmaDefaultEstimate, 8_000_000);
     assert.equal(fast.preferredShortEdge, 1080);
-    assert.equal(measured.abrEwmaDefaultEstimate, 4_500_000);
+    assert.equal(measured.abrEwmaDefaultEstimate, 5_000_000);
     assert.equal(measured.preferredShortEdge, 720);
+    assert.equal(coarseLowDownlink.abrEwmaDefaultEstimate, 5_000_000);
+    assert.equal(coarseLowDownlink.preferredShortEdge, 720);
 });
 
 test('the initial HLS rendition selects the highest rung at or below the network target', () => {

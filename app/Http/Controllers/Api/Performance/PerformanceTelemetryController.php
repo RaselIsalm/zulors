@@ -59,7 +59,7 @@ class PerformanceTelemetryController extends Controller
             'events.*.device_memory' => ['nullable', 'string', 'in:1,2,4,8p,unknown'],
             'events.*.network' => ['nullable', 'string', 'in:offline,slow-2g,2g,3g,4g,unknown'],
             'events.*.server_ms' => ['nullable', 'numeric', 'min:0', 'max:600000'],
-            'events.*.rendition' => ['nullable', 'string', 'in:hls,mp4,direct,240p,360p,480p,720p'],
+            'events.*.rendition' => ['nullable', 'string', 'in:hls,mp4,direct,240p,360p,480p,720p,1080p'],
         ]);
 
         $events = array_map(static function (array $event): array {

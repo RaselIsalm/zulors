@@ -998,7 +998,7 @@
 					const instance = new Hls({
 						autoStartLoad: false,
 						enableWorker: true,
-						capLevelToPlayerSize: true,
+						capLevelToPlayerSize: false,
 						lowLatencyMode: false,
 						testBandwidth: false,
 						backBufferLength: state.networkProfile.reelsBackBufferLength,

@@ -52,4 +52,25 @@ class PerformanceTelemetryTest extends TestCase
             ]],
         ])->assertUnprocessable();
     }
+
+    public function test_1080p_playback_rendition_is_accepted_for_quality_telemetry(): void
+    {
+        $logger = \Mockery::mock();
+        $logger->shouldReceive('info')
+            ->once()
+            ->with('client_performance_batch', \Mockery::on(function (array $context): bool {
+                return ($context['events'][0]['rendition'] ?? null) === '1080p';
+            }));
+
+        Log::shouldReceive('channel')->once()->with('performance')->andReturn($logger);
+
+        $this->postJson('/api/performance/events', [
+            'events' => [[
+                'metric' => 'media_rendition',
+                'value' => 1080,
+                'category' => 'explore',
+                'rendition' => '1080p',
+            ]],
+        ])->assertNoContent();
+    }
 }

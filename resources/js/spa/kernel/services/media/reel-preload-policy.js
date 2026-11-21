@@ -5,20 +5,25 @@ const DEFAULT_ABR_ESTIMATES = {
     normal: 5_000_000,
     fast: 8_000_000,
 };
+const HD_STARTUP_ESTIMATE = 5_000_000;
 
 export function getReelPlaybackStartupPolicy(networkProfile = {}) {
     const profile = String(networkProfile.profile || 'normal');
     const downlinkMbps = Number(networkProfile.downlinkMbps || 0);
     const saveData = Boolean(networkProfile.saveData);
-    const defaultEstimate = saveData
+    const networkEstimate = saveData
         ? DEFAULT_ABR_ESTIMATES.very_slow
         : downlinkMbps > 0
             ? Math.max(850_000, Math.min(8_000_000, Math.round(downlinkMbps * 900_000)))
             : (DEFAULT_ABR_ESTIMATES[profile] || DEFAULT_ABR_ESTIMATES.normal);
+    // Network Information API downlink is a coarse estimate, not measured
+    // throughput. Use it only to choose whether to start above HD; HLS.js will
+    // adapt down after it measures actual segment throughput.
+    const defaultEstimate = Math.max(HD_STARTUP_ESTIMATE, networkEstimate);
 
     return {
         abrEwmaDefaultEstimate: defaultEstimate,
-        preferredShortEdge: defaultEstimate >= 7_800_000 ? 1080 : defaultEstimate >= 4_400_000 ? 720 : defaultEstimate >= 2_400_000 ? 480 : defaultEstimate >= 1_400_000 ? 360 : 240,
+        preferredShortEdge: defaultEstimate >= 7_800_000 ? 1080 : 720,
     };
 }
 
