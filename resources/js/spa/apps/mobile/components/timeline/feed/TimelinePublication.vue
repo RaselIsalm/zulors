@@ -64,6 +64,11 @@
                     <div class="flex items-center gap-1.5">
                         <div class="shrink-0 relative leading-zero">
                             <PrimaryIconButton v-on:click.stop="openReactions" v-bind:disabled="isPendingPost" buttonColor="text-lab-pr2" iconSize="6" iconName="heart-rounded" iconType="line"></PrimaryIconButton>
+                            <FeedReactionPopover
+                                v-if="state.reactionMenu.status"
+                                v-on:add="addReaction"
+                                v-on:close="state.reactionMenu.close"
+                            ></FeedReactionPopover>
                         </div>
                         <div class="shrink-0 leading-zero relative">
                             <PrimaryIconButton v-on:click.stop="sharePost" v-bind:disabled="isPendingPost" buttonColor="text-lab-pr2" iconSize="6" iconName="share-06" iconType="line"></PrimaryIconButton>
@@ -92,10 +97,6 @@
         </div>
     </div>
     
-
-    <PublicationReactions v-if="state.reactionMenu.status"
-        v-on:add="addReaction"
-    v-on:close="state.reactionMenu.close"></PublicationReactions>
 
     <PublicationShare v-if="state.shareMenu.status"
         v-bind:postLink="postLink"
@@ -471,8 +472,8 @@
             PublicationShare: defineAsyncComponent(() => {
 				return import('@M/components/timeline/feed/parts/share/PublicationShare.vue');
 			}),
-            PublicationReactions: defineAsyncComponent(() => {
-				return import('@M/components/timeline/feed/parts/reactions/PublicationReactions.vue');
+				FeedReactionPopover: defineAsyncComponent(() => {
+					return import('@M/components/timeline/feed/parts/reactions/FeedReactionPopover.vue');
 			}),
             PublicationAudio: defineAsyncComponent(() => {
 				return import('@M/components/timeline/feed/parts/media/PublicationAudio.vue');
