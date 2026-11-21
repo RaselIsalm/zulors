@@ -14,14 +14,20 @@ final class ReelsHlsRollout
         return (bool) config('media.reels_hls.enabled', false);
     }
 
-    public function dispatch(Media $media): void
+    public function dispatch(Media $media, bool $highPriority = false): void
     {
         if (! $this->processingEnabled()) {
             return;
         }
 
         try {
-            GeneratePostVideoHls::dispatch((int) $media->id)->afterCommit();
+            $job = GeneratePostVideoHls::dispatch((int) $media->id);
+            $queue = $highPriority
+                ? config('media.queues.video_high', config('media.queues.video'))
+                : config('media.queues.video');
+
+            $job->onQueue((string) $queue);
+            $job->afterCommit();
         } catch (Throwable $exception) {
             Log::warning('Unable to enqueue R2 video HLS processing; stale-job recovery will retry it.', [
                 'exception' => $exception::class,

@@ -200,7 +200,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                 $this->postData->status = PostStatus::ACTIVE;
 
                 $this->postData->save();
-                app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($postMedia->refresh());
+                app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($postMedia->refresh(), true);
 
                 if(config('logging.debugging.video_process_logging')) {
                     $fileNewExists = file_exists($videoNewAbsLocalPath) ? 'Yes' : 'No';
@@ -281,7 +281,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
         $postMedia->metadata = $metadata;
         $postMedia->save();
 
-        app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($postMedia->refresh());
+        app(\App\Services\Media\ReelsHlsRollout::class)->dispatch($postMedia->refresh(), true);
     }
 
     private function prepareLocalSourceVideo($postMedia, VideoUploadService $videoUploadService): string

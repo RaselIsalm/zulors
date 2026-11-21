@@ -60,6 +60,30 @@ class ReelsHlsProcessingTest extends TestCase
         );
     }
 
+    public function test_new_upload_hls_jobs_use_the_high_priority_video_queue(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        config([
+            'media.reels_hls.enabled' => true,
+            'media.queues.video' => 'media-video',
+            'media.queues.video_high' => 'media-video-high',
+        ]);
+        $newUpload = $this->video($this->createPost($this->user()), ['provider' => 'r2']);
+        $backfill = $this->video($this->createPost($this->user()), ['provider' => 'r2']);
+
+        $rollout = app(ReelsHlsRollout::class);
+        $rollout->dispatch($newUpload, true);
+        $rollout->dispatch($backfill);
+
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool =>
+            $job->mediaId === (int) $newUpload->id && $job->queue === 'media-video-high'
+        );
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool =>
+            $job->mediaId === (int) $backfill->id && $job->queue === 'media-video'
+        );
+    }
+
     public function test_hls_uses_the_exact_original_archive_when_it_exists(): void
     {
         Storage::fake('r2_final');
