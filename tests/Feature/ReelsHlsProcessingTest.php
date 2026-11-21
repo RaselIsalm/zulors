@@ -439,6 +439,33 @@ class ReelsHlsProcessingTest extends TestCase
         Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $media->id);
     }
 
+    public function test_reconcile_can_queue_only_the_requested_processed_video_media_ids(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => true]);
+        $first = $this->video($this->createPost($this->user()), ['provider' => 'r2']);
+        $second = $this->video($this->createPost($this->user()), ['provider' => 'r2']);
+        $notSelected = $this->video($this->createPost($this->user()), ['provider' => 'r2']);
+        $alreadyProcessing = $this->video($this->createPost($this->user()), [
+            'provider' => 'r2',
+            'background_processing_state' => 'processing',
+        ]);
+
+        $this->artisan('media:reconcile-reel-hls', [
+            '--media-id' => [$first->id, $second->id, $alreadyProcessing->id],
+            '--limit' => 10,
+        ])
+            ->expectsOutput('Requeued 2 reel HLS job(s).')
+            ->assertSuccessful();
+
+        Queue::assertPushedTimes(GeneratePostVideoHls::class, 2);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $first->id);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $second->id);
+        Queue::assertNotPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $notSelected->id);
+        Queue::assertNotPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $alreadyProcessing->id);
+    }
+
     public function test_missing_only_backfill_skips_ready_queued_and_processing_hls_rows(): void
     {
         Queue::fake();

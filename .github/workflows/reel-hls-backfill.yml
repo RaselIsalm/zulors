@@ -20,6 +20,10 @@ on:
         required: true
         default: 15
         type: number
+      media_ids:
+        description: Optional comma-separated media IDs to target for rebuild (for example 2305,2309,2325).
+        required: false
+        type: string
       confirm:
         description: Enter BACKFILL_LIVE_REEL_HLS to run this production operation.
         required: true
@@ -44,6 +48,7 @@ jobs:
       LIVE_SSH_PRIVATE_KEY: ${{ secrets.LIVE_SSH_PRIVATE_KEY }}
       OPERATION: ${{ inputs.operation }}
       LIMIT: ${{ inputs.limit }}
+      MEDIA_IDS: ${{ inputs.media_ids }}
       CONFIRMATION: ${{ inputs.confirm }}
 
     steps:
@@ -52,6 +57,12 @@ jobs:
           test "$CONFIRMATION" = "BACKFILL_LIVE_REEL_HLS"
           case "$OPERATION" in rebuild|backfill|status|edge-smoke|auth-smoke|access-audit|worker-audit) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
+          if [[ -n "$MEDIA_IDS" ]]; then
+            test "$OPERATION" = "rebuild"
+            IFS=, read -ra media_ids <<< "$MEDIA_IDS"
+            (( ${#media_ids[@]} >= 1 && ${#media_ids[@]} <= 200 ))
+            for media_id in "${media_ids[@]}"; do [[ "$media_id" =~ ^[1-9][0-9]*$ ]]; done
+          fi
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
       - name: Install live deploy key
@@ -65,11 +76,12 @@ jobs:
           ssh -i ~/.ssh/zulors_live_deploy -p "$LIVE_PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=15 "$LIVE_USER@$LIVE_HOST" \
-            "bash -s -- '$LIVE_PATH' '$OPERATION' '$LIMIT'" <<'REMOTE'
+            "bash -s -- '$LIVE_PATH' '$OPERATION' '$LIMIT' '$MEDIA_IDS'" <<'REMOTE'
           set -euo pipefail
           live_path="$1"
           operation="$2"
           limit="$3"
+          media_ids="$4"
           cd "$live_path"
 
           if [[ "$operation" == "access-audit" ]]; then
@@ -114,7 +126,14 @@ jobs:
           fi
 
           if [[ "$operation" == "rebuild" ]]; then
-            php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
+            if [[ -n "$media_ids" ]]; then
+              IFS=, read -ra selected_ids <<< "$media_ids"
+              media_id_args=()
+              for media_id in "${selected_ids[@]}"; do media_id_args+=(--media-id="$media_id"); done
+              php artisan media:reconcile-reel-hls "${media_id_args[@]}" --limit="$limit" --no-ansi
+            else
+              php artisan media:reconcile-reel-hls --rebuild --limit="$limit" --no-ansi
+            fi
             exit
           fi
 

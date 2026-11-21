@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
 
 class ReconcileReelHlsProcessing extends Command
 {
-    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--missing-only : Queue only post videos with missing or failed HLS output} {--rebuild : Queue videos without the current HLS encoding version} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
+    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--missing-only : Queue only post videos with missing or failed HLS output} {--rebuild : Queue videos without the current HLS encoding version} {--media-id=* : Queue specific processed R2 post video media IDs} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
 
     protected $description = 'Requeue stale, failed, or outdated post-video HLS jobs.';
 
@@ -30,7 +30,36 @@ class ReconcileReelHlsProcessing extends Command
             ->where('status', MediaStatus::PROCESSED->value)
             ->where('metadata->provider', 'r2');
 
-        if ($this->option('missing-only')) {
+        $requestedMediaIds = (array) $this->option('media-id');
+        if ($requestedMediaIds !== []) {
+            $mediaIds = [];
+            foreach ($requestedMediaIds as $mediaId) {
+                $mediaId = (string) $mediaId;
+                if (! ctype_digit($mediaId) || (int) $mediaId < 1) {
+                    $this->error('Every --media-id value must be a positive integer.');
+
+                    return self::INVALID;
+                }
+
+                $mediaIds[] = (int) $mediaId;
+            }
+
+            $mediaIds = array_values(array_unique($mediaIds));
+            if (count($mediaIds) > 200) {
+                $this->error('A maximum of 200 media IDs can be queued at a time.');
+
+                return self::INVALID;
+            }
+
+            $query
+                ->where('mediaable_type', \App\Models\Post::class)
+                ->whereIn('id', $mediaIds)
+                ->where(function ($state): void {
+                    $state->whereNull('metadata->background_processing_state')
+                        ->orWhere('metadata->background_processing_state', '<>', 'processing');
+                })
+                ->orderBy('id');
+        } elseif ($this->option('missing-only')) {
             $query
                 ->where('mediaable_type', \App\Models\Post::class)
                 ->where(function ($state): void {
