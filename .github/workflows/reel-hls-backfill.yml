@@ -197,30 +197,46 @@ jobs:
                 variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
                 variant_file="$work_dir/$target_media_id-$short_edge.m3u8"
                 probe_asset "media-$target_media_id-${short_edge}p-playlist" "$variant_url" "$variant_file" "$work_dir/$target_media_id-$short_edge.headers"
-                segment_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$variant_file")"
-                test -n "$segment_path"
-                segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
+                segment_paths="$(awk 'NF && $0 !~ /^#/ {print; count++; if (count == 3) exit}' "$variant_file")"
+                test -n "$segment_paths"
                 segment_file=/dev/null
                 if (( short_edge <= 480 )); then segment_file="$work_dir/$target_media_id-$short_edge-segment.ts"; fi
-                probe_asset "media-$target_media_id-${short_edge}p-segment" "$segment_url" "$segment_file" "$work_dir/$target_media_id-$short_edge-segment.headers"
+                segment_index=0
+                decoded_frames_total=0
+                while IFS= read -r segment_path; do
+                  [[ -n "$segment_path" ]] || continue
+                  segment_index=$((segment_index + 1))
+                  segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
+                  current_segment_file="$segment_file"
+                  if (( segment_index > 1 )); then current_segment_file="$work_dir/$target_media_id-$short_edge-segment-$segment_index.ts"; fi
+                  if (( segment_index == 1 )); then
+                    probe_asset "media-$target_media_id-${short_edge}p-segment" "$segment_url" "$current_segment_file" "$work_dir/$target_media_id-$short_edge-segment.headers"
+                  else
+                    probe_asset "media-$target_media_id-${short_edge}p-segment-$segment_index" "$segment_url" "$current_segment_file" "$work_dir/$target_media_id-$short_edge-segment-$segment_index.headers"
+                  fi
+                  if (( short_edge <= 480 )); then
+                    probe_output="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=width,height,nb_read_frames -of default=noprint_wrappers=1 "$current_segment_file")"
+                    decoded_width="$(awk -F= '$1 == "width" {print $2; exit}' <<< "$probe_output")"
+                    decoded_height="$(awk -F= '$1 == "height" {print $2; exit}' <<< "$probe_output")"
+                    decoded_frames="$(awk -F= '$1 == "nb_read_frames" {print $2; exit}' <<< "$probe_output")"
+                    decoded_dimensions="${decoded_width}x${decoded_height}"
+                    if [[ "$decoded_dimensions" != "$resolution" ]]; then
+                      printf 'sd_decode=fail media_id=%s rung=%sp segment=%s expected=%s actual=%s\n' \
+                        "$target_media_id" "$short_edge" "$segment_index" "$resolution" "$decoded_dimensions" >&2
+                      exit 1
+                    fi
+                    if [[ ! "$decoded_frames" =~ ^[0-9]+$ ]] || (( decoded_frames < 1 )); then
+                      printf 'sd_decode=fail media_id=%s rung=%sp segment=%s invalid_frame_count=%s\n' \
+                        "$target_media_id" "$short_edge" "$segment_index" "$decoded_frames" >&2
+                      exit 1
+                    fi
+                    decoded_frames_total=$((decoded_frames_total + decoded_frames))
+                  fi
+                done <<< "$segment_paths"
+                (( segment_index > 0 ))
                 if (( short_edge <= 480 )); then
-                  probe_output="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=width,height,nb_read_frames -of default=noprint_wrappers=1 "$segment_file")"
-                  decoded_width="$(awk -F= '$1 == "width" {print $2; exit}' <<< "$probe_output")"
-                  decoded_height="$(awk -F= '$1 == "height" {print $2; exit}' <<< "$probe_output")"
-                  decoded_frames="$(awk -F= '$1 == "nb_read_frames" {print $2; exit}' <<< "$probe_output")"
-                  decoded_dimensions="${decoded_width}x${decoded_height}"
-                  if [[ "$decoded_dimensions" != "$resolution" ]]; then
-                    printf 'sd_decode=fail media_id=%s rung=%sp expected=%s actual=%s\n' \
-                      "$target_media_id" "$short_edge" "$resolution" "$decoded_dimensions" >&2
-                    exit 1
-                  fi
-                  if [[ ! "$decoded_frames" =~ ^[0-9]+$ ]] || (( decoded_frames < 1 )); then
-                    printf 'sd_decode=fail media_id=%s rung=%sp invalid_frame_count=%s\n' \
-                      "$target_media_id" "$short_edge" "$decoded_frames" >&2
-                    exit 1
-                  fi
-                  printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s frames=%s average_bitrate=%sbps\n' \
-                    "$target_media_id" "$short_edge" "$decoded_dimensions" "$decoded_frames" "$average_bitrate"
+                  printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s segments=%s frames=%s average_bitrate=%sbps\n' \
+                    "$target_media_id" "$short_edge" "$resolution" "$segment_index" "$decoded_frames_total" "$average_bitrate"
                 fi
               done <<< "$ladder"
               (( rendition_count > 0 ))
