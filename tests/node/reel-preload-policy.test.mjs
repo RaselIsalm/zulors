@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyReelPreloadPolicy, getPreferredReelLevelIndex, getReelPreloadPolicy } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
+import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getMinimumReelAutoBitrate, getPreferredReelLevelIndex, getReelPreloadPolicy } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
 
 test('the next reel preloads one network-appropriate segment then keeps its buffer bounded', () => {
     assert.deepEqual(getReelPreloadPolicy({
@@ -95,6 +95,41 @@ test('portrait HLS levels select the network target by short edge instead of fra
 
     assert.equal(getPreferredReelLevelIndex(levels, 720), 3);
     assert.equal(getPreferredReelLevelIndex(levels, 1080), 4);
+});
+
+test('automatic reel quality stays at or above the lowest available HD rendition', () => {
+    const levels = [
+        { width: 240, height: 426, bitrate: 700_000, maxBitrate: 800_000 },
+        { width: 360, height: 640, bitrate: 1_100_000, maxBitrate: 1_300_000 },
+        { width: 480, height: 854, bitrate: 1_800_000, maxBitrate: 2_100_000 },
+        { width: 720, height: 1280, bitrate: 3_400_000, maxBitrate: 3_850_000 },
+        { width: 1080, height: 1920, bitrate: 6_200_000, maxBitrate: 6_900_000 },
+    ];
+    const hls = { levels, startLevel: -1, config: { minAutoBitrate: 0 } };
+
+    assert.equal(getMinimumReelAutoBitrate(levels), 3_850_000);
+    assert.deepEqual(applyReelStartupQualityPolicy(hls, 1080), {
+        preferredLevel: 4,
+        minAutoBitrate: 3_850_000,
+    });
+    assert.equal(hls.startLevel, 4);
+    assert.equal(hls.config.minAutoBitrate, 3_850_000);
+});
+
+test('the HD automatic quality floor is disabled when a source has no HD rendition', () => {
+    const levels = [
+        { width: 240, height: 426, bitrate: 700_000 },
+        { width: 360, height: 640, bitrate: 1_100_000 },
+        { width: 480, height: 854, bitrate: 1_800_000 },
+    ];
+    const hls = { levels, startLevel: -1, config: { minAutoBitrate: 1_100_000 } };
+
+    assert.deepEqual(applyReelStartupQualityPolicy(hls, 720), {
+        preferredLevel: 2,
+        minAutoBitrate: 0,
+    });
+    assert.equal(hls.startLevel, 2);
+    assert.equal(hls.config.minAutoBitrate, 0);
 });
 
 test('activating the warmed reel updates its adaptive estimate and expands the HLS buffer', () => {

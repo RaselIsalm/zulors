@@ -1,6 +1,6 @@
 import Hls from 'hls.js';
 import { getNetworkProfileSnapshot } from '../../network/index.js';
-import { getPreferredReelLevelIndex, getReelPlaybackStartupPolicy } from '../reel-preload-policy.js';
+import { applyReelStartupQualityPolicy, getReelPlaybackStartupPolicy } from '../reel-preload-policy.js';
 import { canVideoElementPlayNatively, HLS_CONTENT_TYPE } from './index.js';
 
 export const hlsOptionsFor = (networkProfile) => ({
@@ -183,13 +183,10 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			}
 
 			manifestReady = true;
-			const preferredLevel = getPreferredReelLevelIndex(
-				instance.levels,
+			applyReelStartupQualityPolicy(
+				instance,
 				getReelPlaybackStartupPolicy(getNetworkProfile()).preferredShortEdge
 			);
-			if(preferredLevel >= 0) {
-				instance.startLevel = preferredLevel;
-			}
 
 			if(loadRequested) {
 				startHlsLoad();

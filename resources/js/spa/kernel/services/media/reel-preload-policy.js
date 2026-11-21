@@ -56,6 +56,48 @@ export function getPreferredReelLevelIndex(levels = [], preferredShortEdge = 720
     return atOrBelowTarget[atOrBelowTarget.length - 1]?.index ?? -1;
 }
 
+export function getMinimumReelAutoBitrate(levels = [], minimumShortEdge = 720) {
+    if(! Array.isArray(levels) || levels.length === 0) {
+        return 0;
+    }
+
+    const hdLevels = levels
+        .map((level) => {
+            const width = Number(level?.width || 0);
+            const height = Number(level?.height || 0);
+
+            return {
+                shortEdge: width > 0 && height > 0 ? Math.min(width, height) : height,
+                bitrate: Number(level?.maxBitrate || level?.bitrate || 0),
+            };
+        })
+        .filter((level) => level.shortEdge >= minimumShortEdge && level.bitrate > 0)
+        .sort((left, right) => left.shortEdge - right.shortEdge || left.bitrate - right.bitrate);
+
+    return hdLevels[0]?.bitrate ?? 0;
+}
+
+export function applyReelStartupQualityPolicy(hlsInstance, preferredShortEdge = 720) {
+    if(! hlsInstance) {
+        return { preferredLevel: -1, minAutoBitrate: 0 };
+    }
+
+    const preferredLevel = getPreferredReelLevelIndex(hlsInstance.levels || [], preferredShortEdge);
+    const minAutoBitrate = getMinimumReelAutoBitrate(hlsInstance.levels || []);
+
+    if(preferredLevel >= 0) {
+        hlsInstance.startLevel = preferredLevel;
+    }
+
+    // Keep automatic switching within HD once an HD rendition is available.
+    // Smaller sources have no HD rung, so their ABR range stays unrestricted.
+    if(hlsInstance.config) {
+        hlsInstance.config.minAutoBitrate = minAutoBitrate;
+    }
+
+    return { preferredLevel, minAutoBitrate };
+}
+
 export function getReelPreloadPolicy({ active = false, isNext = false, networkProfile = {} } = {}) {
     const mayPrefetch = !networkProfile.offline && !networkProfile.saveData && networkProfile.allowVideoPrefetch !== false;
     const prewarmingNext = !active && isNext && mayPrefetch;
