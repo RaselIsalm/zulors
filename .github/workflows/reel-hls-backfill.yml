@@ -208,7 +208,12 @@ jobs:
                   printf 'sd_probe media_id=%s expected=%s actual=%s average_bitrate=%sbps\n' \
                     "$target_media_id" "$resolution" "$decoded_dimensions" "$average_bitrate"
                   test "$decoded_dimensions" = "$resolution"
-                  ffmpeg -hide_banner -loglevel error -xerror -i "$segment_file" -map 0:v:0 -f null -
+                  decode_log="$work_dir/$target_media_id-$short_edge-decode.log"
+                  if ! ffmpeg -hide_banner -loglevel error -xerror -i "$segment_file" -map 0:v:0 -f null - 2>"$decode_log"; then
+                    printf 'sd_decode=fail media_id=%s rung=%sp detail=%s\n' \
+                      "$target_media_id" "$short_edge" "$(tail -n 3 "$decode_log" | tr '\n' ' ')" >&2
+                    exit 1
+                  fi
                   printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s average_bitrate=%sbps\n' \
                     "$target_media_id" "$short_edge" "$decoded_dimensions" "$average_bitrate"
                 fi
