@@ -183,24 +183,33 @@ jobs:
               printf 'edge_smoke_media_id=%s\n' "$target_media_id"
               master_file="$work_dir/$target_media_id-master.m3u8"
               probe_asset "media-$target_media_id-master" "$master_url" "$master_file" "$work_dir/$target_media_id-master.headers"
-              ladder="$(awk '/^#EXT-X-STREAM-INF:/ {attributes=$0; next} attributes && NF && $0 !~ /^#/ {match(attributes, /RESOLUTION=[0-9]+x[0-9]+/); resolution=substr(attributes, RSTART + 11, RLENGTH - 11); print resolution "\t" $0; attributes=""}' "$master_file")"
+              ladder="$(awk '/^#EXT-X-STREAM-INF:/ {attributes=$0; next} attributes && NF && $0 !~ /^#/ {match(attributes, /RESOLUTION=[0-9]+x[0-9]+/); resolution=substr(attributes, RSTART + 11, RLENGTH - 11); match(attributes, /AVERAGE-BANDWIDTH=[0-9]+/); average=substr(attributes, RSTART + 18, RLENGTH - 18); print resolution "\t" average "\t" $0; attributes=""}' "$master_file")"
               test -n "$ladder"
               rendition_count=0
               rendition_list=()
-              while IFS=$'\t' read -r resolution variant_path; do
+              while IFS=$'\t' read -r resolution average_bitrate variant_path; do
                 [[ -n "$resolution" && -n "$variant_path" ]] || continue
                 width="${resolution%%x*}"
                 height="${resolution#*x}"
                 if (( width < height )); then short_edge="$width"; else short_edge="$height"; fi
                 rendition_count=$((rendition_count + 1))
-                rendition_list+=("${short_edge}p")
+                rendition_list+=("${short_edge}p:${average_bitrate}bps")
                 variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
                 variant_file="$work_dir/$target_media_id-$short_edge.m3u8"
                 probe_asset "media-$target_media_id-${short_edge}p-playlist" "$variant_url" "$variant_file" "$work_dir/$target_media_id-$short_edge.headers"
                 segment_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$variant_file")"
                 test -n "$segment_path"
                 segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
-                probe_asset "media-$target_media_id-${short_edge}p-segment" "$segment_url" /dev/null "$work_dir/$target_media_id-$short_edge-segment.headers"
+                segment_file=/dev/null
+                if (( short_edge <= 480 )); then segment_file="$work_dir/$target_media_id-$short_edge-segment.ts"; fi
+                probe_asset "media-$target_media_id-${short_edge}p-segment" "$segment_url" "$segment_file" "$work_dir/$target_media_id-$short_edge-segment.headers"
+                if (( short_edge <= 480 )); then
+                  decoded_dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$segment_file")"
+                  test "$decoded_dimensions" = "$resolution"
+                  ffmpeg -hide_banner -loglevel error -xerror -i "$segment_file" -map 0:v:0 -f null -
+                  printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s average_bitrate=%sbps\n' \
+                    "$target_media_id" "$short_edge" "$decoded_dimensions" "$average_bitrate"
+                fi
               done <<< "$ladder"
               (( rendition_count > 0 ))
               printf 'edge_smoke_video_result=pass media_id=%s renditions=%s ladder=%s\n' \
