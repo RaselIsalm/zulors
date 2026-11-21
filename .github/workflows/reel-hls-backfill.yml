@@ -214,8 +214,17 @@ jobs:
                       "$target_media_id" "$short_edge" "$(tail -n 3 "$decode_log" | tr '\n' ' ')" >&2
                     exit 1
                   fi
-                  decoded_frames="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of default=nokey=1:noprint_wrappers=1 "$segment_file")"
-                  test "$decoded_frames" -gt 0
+                  printf 'sd_ffmpeg_decode=pass media_id=%s rung=%sp\n' "$target_media_id" "$short_edge"
+                  if ! decoded_frames="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of default=nokey=1:noprint_wrappers=1 "$segment_file")"; then
+                    printf 'sd_frame_count=probe-fail media_id=%s rung=%sp detail=%s\n' \
+                      "$target_media_id" "$short_edge" "$(tail -n 3 "$decode_log" | tr '\n' ' ')" >&2
+                    exit 1
+                  fi
+                  printf 'sd_frame_count media_id=%s rung=%sp frames=%s\n' "$target_media_id" "$short_edge" "$decoded_frames"
+                  if [[ ! "$decoded_frames" =~ ^[0-9]+$ ]] || (( decoded_frames < 1 )); then
+                    printf 'sd_decode=fail media_id=%s rung=%sp invalid_frame_count\n' "$target_media_id" "$short_edge" >&2
+                    exit 1
+                  fi
                   printf 'sd_decode=pass media_id=%s rung=%sp dimensions=%s frames=%s average_bitrate=%sbps\n' \
                     "$target_media_id" "$short_edge" "$decoded_dimensions" "$decoded_frames" "$average_bitrate"
                 fi
