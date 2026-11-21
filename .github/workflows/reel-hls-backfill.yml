@@ -21,7 +21,7 @@ on:
         default: 15
         type: number
       media_ids:
-        description: Optional comma-separated media IDs to target for rebuild (for example 2305,2309,2325).
+        description: Optional comma-separated media IDs to rebuild/probe, or all for an edge smoke across every video.
         required: false
         type: string
       confirm:
@@ -58,10 +58,14 @@ jobs:
           case "$OPERATION" in rebuild|backfill|status|edge-smoke|auth-smoke|access-audit|worker-audit) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           if [[ -n "$MEDIA_IDS" ]]; then
-            [[ "$OPERATION" == "rebuild" || "$OPERATION" == "edge-smoke" ]]
-            IFS=, read -ra media_ids <<< "$MEDIA_IDS"
-            (( ${#media_ids[@]} >= 1 && ${#media_ids[@]} <= 200 ))
-            for media_id in "${media_ids[@]}"; do [[ "$media_id" =~ ^[1-9][0-9]*$ ]]; done
+            if [[ "$MEDIA_IDS" == "all" ]]; then
+              test "$OPERATION" = "edge-smoke"
+            else
+              [[ "$OPERATION" == "rebuild" || "$OPERATION" == "edge-smoke" ]]
+              IFS=, read -ra media_ids <<< "$MEDIA_IDS"
+              (( ${#media_ids[@]} >= 1 && ${#media_ids[@]} <= 200 ))
+              for media_id in "${media_ids[@]}"; do [[ "$media_id" =~ ^[1-9][0-9]*$ ]]; done
+            fi
           fi
           test -n "$LIVE_HOST" && test -n "$LIVE_USER" && test -n "$LIVE_PATH" && test -n "$LIVE_SSH_PRIVATE_KEY"
 
@@ -148,15 +152,15 @@ jobs:
                   ->where("mediaable_type", \App\Models\Post::class)
                   ->where("metadata->provider", "r2")
                   ->where("metadata->playback->hls_state", "ready");
-              $ids = array_filter(array_map("intval", explode(",", (string) getenv("MEDIA_IDS"))));
+              $requested = (string) getenv("MEDIA_IDS");
+              $ids = $requested === "all" ? [] : array_filter(array_map("intval", explode(",", $requested)));
               if ($ids) $query->whereIn("id", $ids);
-              $media = $query->orderBy("id")->first();
-              if ($media) echo (int) $media->id."\t".(string) data_get($media->metadata, "playback.hls");
+              foreach ($query->orderBy("id")->get(["id", "metadata"]) as $media) {
+                  $url = (string) data_get($media->metadata, "playback.hls");
+                  if ($url !== "") echo (int) $media->id."\t".$url.PHP_EOL;
+              }
             ' )"
-            IFS=$'\t' read -r target_media_id master_url <<< "$target_info"
-            test -n "$target_media_id" && test -n "$master_url"
-            printf 'edge_smoke_media_id=%s\n' "$target_media_id"
-            test -n "$master_url"
+            test -n "$target_info"
             work_dir="$(mktemp -d)"
             trap 'rm -rf "$work_dir"' EXIT
 
@@ -172,20 +176,38 @@ jobs:
               test "$code" = 200
             }
 
-            probe_asset master-first "$master_url" "$work_dir/master.m3u8" "$work_dir/master.headers"
-            variant_info="$(awk '/^#EXT-X-STREAM-INF:/ {attributes=$0; next} attributes && NF && $0 !~ /^#/ {print attributes "\t" $0; exit}' "$work_dir/master.m3u8")"
-            IFS=$'\t' read -r variant_attributes variant_path <<< "$variant_info"
-            test -n "$variant_path"
-            printf 'master_first_variant=%s\n' "$variant_attributes"
-            variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
-            probe_asset master-repeat "$master_url" /dev/null "$work_dir/master-repeat.headers"
-            probe_asset variant-first "$variant_url" "$work_dir/variant.m3u8" "$work_dir/variant.headers"
-            segment_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$work_dir/variant.m3u8")"
-            test -n "$segment_path"
-            segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
-            probe_asset variant-repeat "$variant_url" /dev/null "$work_dir/variant-repeat.headers"
-            probe_asset segment-first "$segment_url" /dev/null "$work_dir/segment-first.headers"
-            probe_asset segment-repeat "$segment_url" /dev/null "$work_dir/segment-repeat.headers"
+            video_count=0
+            while IFS=$'\t' read -r target_media_id master_url; do
+              [[ -n "$target_media_id" && -n "$master_url" ]] || continue
+              video_count=$((video_count + 1))
+              printf 'edge_smoke_media_id=%s\n' "$target_media_id"
+              master_file="$work_dir/$target_media_id-master.m3u8"
+              probe_asset "media-$target_media_id-master" "$master_url" "$master_file" "$work_dir/$target_media_id-master.headers"
+              ladder="$(awk '/^#EXT-X-STREAM-INF:/ {attributes=$0; next} attributes && NF && $0 !~ /^#/ {match(attributes, /RESOLUTION=[0-9]+x[0-9]+/); resolution=substr(attributes, RSTART + 11, RLENGTH - 11); print resolution "\t" $0; attributes=""}' "$master_file")"
+              test -n "$ladder"
+              rendition_count=0
+              rendition_list=()
+              while IFS=$'\t' read -r resolution variant_path; do
+                [[ -n "$resolution" && -n "$variant_path" ]] || continue
+                width="${resolution%%x*}"
+                height="${resolution#*x}"
+                if (( width < height )); then short_edge="$width"; else short_edge="$height"; fi
+                rendition_count=$((rendition_count + 1))
+                rendition_list+=("${short_edge}p")
+                variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
+                variant_file="$work_dir/$target_media_id-$short_edge.m3u8"
+                probe_asset "media-$target_media_id-${short_edge}p-playlist" "$variant_url" "$variant_file" "$work_dir/$target_media_id-$short_edge.headers"
+                segment_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$variant_file")"
+                test -n "$segment_path"
+                segment_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$variant_url" "$segment_path")"
+                probe_asset "media-$target_media_id-${short_edge}p-segment" "$segment_url" /dev/null "$work_dir/$target_media_id-$short_edge-segment.headers"
+              done <<< "$ladder"
+              (( rendition_count > 0 ))
+              printf 'edge_smoke_video_result=pass media_id=%s renditions=%s ladder=%s\n' \
+                "$target_media_id" "$rendition_count" "$(IFS=,; echo "${rendition_list[*]}")"
+            done <<< "$target_info"
+            test "$video_count" -gt 0
+            printf 'edge_smoke_videos=%s result=pass\n' "$video_count"
             exit
           fi
 
