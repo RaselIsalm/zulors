@@ -100,6 +100,7 @@ test('normal feed playback starts from an HD-capable bandwidth estimate', () => 
 
     assert.equal(options.startLevel, -1);
     assert.equal(options.testBandwidth, false);
+    assert.equal(options.capLevelToPlayerSize, false);
     assert.equal(options.abrEwmaDefaultEstimate, 5_000_000);
 });
 

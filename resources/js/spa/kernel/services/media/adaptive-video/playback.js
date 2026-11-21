@@ -6,7 +6,7 @@ import { canVideoElementPlayNatively, HLS_CONTENT_TYPE } from './index.js';
 export const hlsOptionsFor = (networkProfile) => ({
 	autoStartLoad: false,
 	enableWorker: true,
-	capLevelToPlayerSize: true,
+	capLevelToPlayerSize: false,
 	lowLatencyMode: false,
 	testBandwidth: false,
 	backBufferLength: networkProfile?.reelsBackBufferLength ?? 6,
