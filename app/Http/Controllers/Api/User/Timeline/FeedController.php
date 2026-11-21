@@ -76,7 +76,10 @@ class FeedController extends Controller
         ];
 
         if(! $canUseHomeSwr) {
-            return $this->responseSuccess($this->withNativeSponsoredAd($payload, $this->nativeAdPlacement($filter)));
+            return $this->responseSuccess($this->withNativeSponsoredAd($payload, $this->nativeAdPlacement($filter)))
+                ->withHeaders([
+                    'Server-Timing' => 'timeline-feed;dur=' . $this->toMilliseconds($startedAt),
+                ]);
         }
 
         $snapshotHash = $this->homeFeedSnapshotHash($payload);

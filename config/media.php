@@ -80,7 +80,7 @@ return [
     ],
 
     'reels_hls' => [
-        'enabled' => (bool) env('MEDIA_REELS_HLS_ENABLED', false),
+        'enabled' => (bool) env('MEDIA_REELS_HLS_ENABLED', true),
         'timeout_seconds' => (int) env('MEDIA_REELS_HLS_TIMEOUT_SECONDS', 21600),
         'stale_after_minutes' => (int) env('MEDIA_REELS_HLS_STALE_AFTER_MINUTES', 120),
     ],

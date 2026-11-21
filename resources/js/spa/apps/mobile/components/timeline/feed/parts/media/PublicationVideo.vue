@@ -24,7 +24,7 @@
 				v-bind:aspectRatio="mediaAspectRatio"
 			v-bind:sponsoredFeed="sponsoredFeed"
 				v-bind:surfaceClickAction="openReelsOnTap ? 'emit' : 'toggle'"
-				v-on:surface-click="$emit('open-reels')"
+			v-on:surface-click="$emit('open-reels', $event)"
 			></VideoPlayer>
 		</div>
 	</div>

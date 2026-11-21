@@ -411,12 +411,13 @@
                         state.commentsMenu.open();
                     }
                 },
-                openReelsViewer: () => {
+				openReelsViewer: (playbackState = {}) => {
                     if(isOptimisticPost.value || ! postData.value.hash_id) {
                         return false;
                     }
 
                     if(! props.sponsoredAdId) {
+						reelsStore.primeWithPost(postData.value, playbackState);
                         reelsStore.prefetchFirstPage(postData.value.hash_id).catch(() => {});
                     }
 

@@ -481,6 +481,8 @@ class FeedRankingAndInterestGraphTest extends TestCase
             ->assertJsonPath('meta.feed.type', 'reels')
             ->assertJsonPath('meta.feed.scored', true);
 
+		$this->assertNotEmpty($response->headers->get('Server-Timing'));
+
         $postIds = array_column($response->json('data'), 'id');
 
         $this->assertContains($playableVideo->id, $postIds);

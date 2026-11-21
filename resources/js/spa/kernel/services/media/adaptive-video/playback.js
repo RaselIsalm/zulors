@@ -29,6 +29,8 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 	let destroyed = false;
 	let resumePosition = 0;
 	let nativeErrorHandler = null;
+	let handoffDetached = false;
+	let handoffRetained = false;
 
 	const releaseHls = () => {
 		if(! hlsInstance) {
@@ -175,7 +177,9 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 				return;
 			}
 
-			instance.loadSource(nextSource.url);
+			if(! instance.url) {
+				instance.loadSource(nextSource.url);
+			}
 		});
 		instance.on(HlsClass.Events.MANIFEST_PARSED, () => {
 			if(hlsInstance !== instance) {
@@ -215,6 +219,114 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			}
 			catch(error) {}
 		},
+		setCallbacks(callbacks = {}) {
+			Object.assign(options, callbacks);
+		},
+		getHlsInstance() {
+			return hlsInstance;
+		},
+		isHandedOff() {
+			return handoffRetained;
+		},
+		detachForHandoff() {
+			if(destroyed || !hlsInstance || !videoElement || source?.transport !== 'hls') {
+				return null;
+			}
+
+			try {
+				hlsInstance.stopLoad();
+				const transferData = hlsInstance.transferMedia();
+				if(!transferData) {
+					return null;
+				}
+
+				handoffDetached = true;
+				handoffRetained = true;
+
+				return {
+					controller: this,
+					hlsInstance,
+					transferData,
+					oldVideoElement: videoElement,
+					currentTime: Number(videoElement.currentTime || 0),
+					source,
+					fallbackSource,
+				};
+			}
+			catch(error) {
+				return null;
+			}
+		},
+		attachTransferredMedia(handoff, nextVideoElement) {
+			if(destroyed || !handoff || handoff.controller !== this || handoff.hlsInstance !== hlsInstance || !nextVideoElement) {
+				return false;
+			}
+
+			const oldVideoElement = handoff.oldVideoElement;
+			const transferredSrc = oldVideoElement?.currentSrc || oldVideoElement?.src || '';
+			if(!transferredSrc) {
+				return false;
+			}
+
+			try {
+				nextVideoElement.src = transferredSrc;
+				videoElement = nextVideoElement;
+				hlsInstance.attachMedia({
+					...handoff.transferData,
+					media: nextVideoElement,
+				});
+				handoffDetached = false;
+				loadRequested = true;
+
+				const restorePosition = () => {
+					if(handoff.currentTime > 0 && Math.abs(Number(nextVideoElement.currentTime || 0) - handoff.currentTime) > 0.5) {
+						try {
+							nextVideoElement.currentTime = handoff.currentTime;
+						}
+						catch(error) {}
+					}
+				};
+
+				if(nextVideoElement.readyState >= 1) {
+					restorePosition();
+				}
+				else {
+					nextVideoElement.addEventListener('loadedmetadata', restorePosition, { once: true });
+				}
+				this.startLoad(handoff.currentTime);
+
+				oldVideoElement?.pause?.();
+				if(oldVideoElement && oldVideoElement !== nextVideoElement) {
+					oldVideoElement.removeAttribute?.('src');
+					oldVideoElement.load?.();
+				}
+
+				return true;
+			}
+			catch(error) {
+				return false;
+			}
+		},
+		restoreFromHandoff(handoff) {
+			if(!handoff?.oldVideoElement) {
+				return false;
+			}
+
+			return this.attachTransferredMedia(handoff, handoff.oldVideoElement);
+		},
+		discardHandoff(handoff) {
+			if(handoff?.controller !== this || handoff.hlsInstance !== hlsInstance) {
+				return false;
+			}
+
+			if(handoffDetached && ! this.restoreFromHandoff(handoff)) {
+				handoffDetached = false;
+			}
+
+			this.destroy();
+
+			return true;
+		},
 		stopLoad() {
 			loadRequested = false;
 			try {
@@ -247,7 +359,12 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			return resumed;
 		},
 		destroy() {
+			if(handoffDetached) {
+				return;
+			}
+
 			destroyed = true;
+			handoffRetained = false;
 			loadRequested = false;
 			source = null;
 			fallbackSource = null;

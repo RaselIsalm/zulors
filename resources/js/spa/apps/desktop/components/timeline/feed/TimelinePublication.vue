@@ -337,13 +337,13 @@
                 postData: postData,
                 publicationRootRef: publicationRootRef,
                 state: state,
-                openReelsViewer: () => {
+				openReelsViewer: (playbackState = {}) => {
                     if(! postData.value?.hash_id) {
                         return;
                     }
 
                     if(! props.sponsoredAdId) {
-						reelsStore.primeWithPost(postData.value);
+						reelsStore.primeWithPost(postData.value, playbackState);
 						reelsStore.prefetchFirstPage(postData.value.hash_id, {
 							refreshReason: 'post_entry'
 						}).catch(() => {});

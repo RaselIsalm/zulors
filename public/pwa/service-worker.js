@@ -495,7 +495,7 @@ const prefetchHlsPlayback = async (url, priority, preferredShortEdge = 0) => {
 const prefetchHlsWindow = async (current = [], next = [], preferredShortEdge = 720) => {
     const orderedUrls = [
         ...current.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 3]),
-        ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 2]),
+        ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 2).map((url) => [url, 2]),
     ];
 
     for(const [url, priority] of orderedUrls) {

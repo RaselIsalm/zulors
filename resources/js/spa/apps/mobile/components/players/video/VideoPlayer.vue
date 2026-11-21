@@ -92,6 +92,7 @@
 	import { useIntersectionObserver } from '@/kernel/vue/composables/inter-obs/index.js';
 	import { buildAdaptiveVideoSource, getDirectPlaybackFallback } from '@/kernel/services/media/adaptive-video/index.js';
 	import { createAdaptiveVideoPlaybackController } from '@/kernel/services/media/adaptive-video/playback.js';
+	import { retainReelPlaybackHandoff } from '@/kernel/services/media/reel-playback-handoff.js';
 	import { colibriEventBus } from '@/kernel/events/bus/index.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { buildVideoPresentationMetadata, videoFrameAspectStyle } from '@/kernel/services/media/video-metadata.js';
@@ -438,12 +439,19 @@
 					videoPlayerRef.value.removeEventListener('durationchange', handleVideoReady);
 					videoPlayerRef.value.removeEventListener('progress', syncBufferedProgress);
 					flushVideoTelemetry('video_watch');
-					pauseVideo();
+					if(! playbackController?.isHandedOff()) {
+						pauseVideo();
+					}
 				}
 
 				stopProgressUpdater();
-				playbackController?.destroy();
-				playbackController = null;
+				if(playbackController?.isHandedOff()) {
+					playbackController = null;
+				}
+				else {
+					playbackController?.destroy();
+					playbackController = null;
+				}
 				unregisterPlaybackCandidate();
 			});
 
@@ -869,7 +877,29 @@
 				noop: noop,
 				handleVideoSurfaceClick: () => {
 					if(props.surfaceClickAction === 'emit') {
-						context.emit('surface-click');
+						const wasPlaying = Boolean(state.isPlaying && !videoPlayerRef.value?.paused);
+						const playbackState = {
+							mediaId: props.mediaId,
+							currentTime: Number(videoPlayerRef.value?.currentTime || 0),
+							wasPlaying,
+							startedAt: Date.now(),
+						};
+
+						if(playbackSource.value.transport === 'hls' && playbackController?.getHlsInstance()) {
+							if(wasPlaying) {
+								pauseVideo();
+							}
+
+							const transferredMedia = playbackController.detachForHandoff();
+							if(transferredMedia) {
+								playbackState.handoffToken = retainReelPlaybackHandoff(props.mediaId, transferredMedia);
+								if(! playbackState.handoffToken) {
+									playbackController.discardHandoff(transferredMedia);
+								}
+							}
+						}
+
+						context.emit('surface-click', playbackState);
 
 						return;
 					}

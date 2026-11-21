@@ -11,9 +11,9 @@ capped at the source short edge, except a source within 1% of 720p is normalized
 to a 720p rung to account for small camera/crop dimension offsets. It preserves
 source aspect ratio and frame rate. Each master
 variant reports its encoded resolution, frame rate, codecs, measured average
-bandwidth and segment-measured peak bandwidth. The default native-HLS variant
-is the highest available rung up to 720p; HLS.js starts at an HD rung before
-loading the first segment. Two-second
+bandwidth and segment-measured peak bandwidth. The initial HLS rung follows the
+estimated network profile, then ABR can move through the full ladder, including
+below the startup rung when measured throughput requires it. Two-second
 segments begin with aligned keyframes to reduce the initial download and wait
 for a segment boundary. The master playlist is published only after its
 segments are uploaded. The HLS encoding version changes whenever rendition
@@ -26,7 +26,7 @@ receive `public, max-age=31536000, immutable` cache headers. R2 serves byte
 ranges for direct MP4 requests; the service worker passes range requests through
 instead of storing incomplete media responses. The web and mobile feed players
 prefer HLS.js whenever Media Source Extensions are available so the startup
-level and HD floor apply even when the browser also advertises native HLS. Native
+level and adaptive startup selection apply even when the browser also advertises native HLS. Native
 HLS is used when HLS.js is unavailable; the player falls back to MP4 if adaptive
 playback cannot start.
 
@@ -41,26 +41,27 @@ reads, HEAD requests, byte ranges, and exposed `Content-Range` headers. Live
 deployments run this check before promoting a release.
 
 Feed cards render the thumbnail first and mount players within 1200 pixels of
-the viewport. Feed HLS loads only after the playback arbiter selects a visible
-video. The service worker caches app-origin media and HLS objects from the
-allowlisted `media.zulors.com` origin in its bounded media cache. It warms the
-current and next videos' network-appropriate starting rendition and first
+the viewport. The service worker caches app-origin media and HLS objects from the
+allowlisted `media.zulors.com` origin in its bounded media cache. Feed prefetch
+warms the current video and up to two upcoming HLS videos on normal connections,
+or one upcoming video on slow connections. Reels uses the same one/two-video
+lookahead. It fetches the network-appropriate starting rendition and first
 segment. Immutable cached playlists and segments are served without an extra
 revalidation request. It skips network
 prefetch while offline or using Data Saver; direct MP4 sources are never
 downloaded in full just to warm the cache.
-Native playback uses metadata preloading. Reels keep the next rendition and
-buffer bounded. Active playback starts at 720p (or the highest available rung
-below it), and at 1080p when the coarse network estimate supports it. The
-browser's Network Information `downlink` hint does not lower the startup rung;
-HLS.js adapts through the full ladder after measuring segment throughput while
-respecting the HD floor. Stall recovery also stays at or above the lowest HD
-level when one is present. Reel players do not cap HLS by their CSS box dimensions, which can be smaller than
+Native playback uses metadata preloading. Reels keep upcoming rendition and
+buffer lengths bounded. Startup can begin at 240p, 360p, 480p, 720p or 1080p
+based on the coarse network estimate; HLS.js adapts using measured segment
+throughput and is not held above an HD bitrate floor. Reel players do not cap HLS by their CSS box dimensions, which can be smaller than
 the video's intended HD resolution. Off-screen feed players pause and stop HLS downloads while keeping
 their attached source and decoded frame. Reels keep loaded nearby sources and
 release them outside the preload window. The feed playback arbiter allows one
-visible video to play at a time. HLS.js waits for the master
-manifest, selects an HD startup rendition before segment loading, then
+visible video to play at a time. Feed-to-Reels entry primes the tapped post
+before route navigation and transfers the active HLS.js controller and buffered
+MediaSource when available. Without a transferable HLS session, the primed
+post, poster, and prefetched HLS objects provide the fallback path. HLS.js waits for the master
+manifest, selects a network-appropriate startup rendition before segment loading, then
 continues adaptive switching as real throughput is measured. These changes shorten startup when
 the prefetched response is available, but cannot guarantee zero delay on slow
 or unavailable networks.
@@ -116,6 +117,10 @@ Queue only missing or failed HLS outputs in bounded batches:
 ```bash
 php artisan media:reconcile-reel-hls --missing-only --limit=200
 ```
+
+Repeat the missing-only command until it reports no remaining eligible videos
+to queue. Watch the media queue and worker capacity between batches; the code
+change enables HLS generation but does not enqueue a production backfill.
 
 Queue outdated renditions in bounded batches after deploying an encoding
 version change:

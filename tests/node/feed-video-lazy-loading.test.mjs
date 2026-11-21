@@ -57,7 +57,20 @@ test('timeline prefetch keeps image lookahead and bounds the HLS cache window', 
 
     assert.doesNotMatch(source, /createElement\(['"]video['"]\)/);
     assert.match(source, /prefetchImage\(mediaItem\.thumbnail_url\)/);
-    assert.match(source, /collectHlsPlaybackUrls\(postsBatch, 2\)/);
+    assert.match(source, /collectHlsPlaybackUrls\(postsBatch, isSlowNetworkProfile\(networkProfile\) \? 2 : 3\)/);
     assert.match(source, /type: 'ZULORS_REELS_CACHE_WINDOW'/);
-    assert.match(source, /prefetch: !networkProfile\.offline && !networkProfile\.saveData && networkProfile\.allowVideoPrefetch !== false/);
+    assert.match(source, /prefetch: !networkProfile\.offline && !networkProfile\.saveData/);
 });
+
+for(const platform of Object.values(platforms)) {
+    test(`${platform} primes Reels with the tapped feed post before navigating`, async () => {
+        const timelinePath = `../../resources/js/spa/apps/${platform}/components/timeline/feed/TimelinePublication.vue`;
+        const storePath = `../../resources/js/spa/apps/${platform}/store/explore/reels.store.js`;
+        const timeline = parse((await readFile(new URL(timelinePath, import.meta.url))).toString()).descriptor;
+        const store = (await readFile(new URL(storePath, import.meta.url))).toString();
+
+        assert.match(timeline.script.content, /reelsStore\.primeWithPost\(postData\.value, playbackState\)/);
+        assert.match(store, /entryPostHashId === nextSeedHashId/);
+        assert.match(store, /playbackHandoff/);
+    });
+}

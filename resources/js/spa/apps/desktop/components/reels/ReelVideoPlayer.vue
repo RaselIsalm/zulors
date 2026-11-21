@@ -1,8 +1,8 @@
 <template>
 	<div class="absolute inset-0 bg-black">
 		<img
-			v-if="mediaItem.thumbnail_url"
-			v-bind:src="mediaItem.thumbnail_url"
+			v-if="posterUrl"
+			v-bind:src="posterUrl"
 			alt=""
 			class="pointer-events-none absolute inset-0 size-full scale-110 object-cover opacity-35 blur-xl"
 		>
@@ -16,7 +16,7 @@
 				playsinline
 				v-bind:src="nativeVideoUrl || null"
 				v-bind:preload="videoPreload"
-				v-bind:poster="mediaItem.thumbnail_url"
+				v-bind:poster="posterUrl"
 				v-bind:muted="state.isMuted"
 				v-on:click.stop="handleSurfaceTap"
 				v-on:loadedmetadata="handleLoadedMetadata"
@@ -32,8 +32,8 @@
 				loop
 			></video>
 		</template>
-		<template v-else-if="mediaItem.thumbnail_url">
-			<img v-bind:src="mediaItem.thumbnail_url" alt="" class="relative z-10 size-full object-contain bg-transparent">
+		<template v-else-if="posterUrl">
+			<img v-bind:src="posterUrl" alt="" class="relative z-10 size-full object-contain bg-transparent">
 		</template>
 		<template v-else>
 			<div class="relative z-10 size-full inline-flex-center bg-black text-white/60">
@@ -43,7 +43,7 @@
 
 		<img
 			v-if="showPosterCover"
-			v-bind:src="mediaItem.thumbnail_url"
+			v-bind:src="posterUrl"
 			alt=""
 			class="pointer-events-none absolute inset-0 z-20 size-full object-contain bg-transparent transition-opacity duration-150"
 		>
@@ -94,6 +94,7 @@
 	import Hls from 'hls.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { buildAdaptiveVideoSource, getDirectPlaybackFallback, shouldUseHlsJs } from '@/kernel/services/media/adaptive-video/index.js';
+	import { takeReelPlaybackHandoff } from '@/kernel/services/media/reel-playback-handoff.js';
 	import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getReelPreloadPolicy } from '@/kernel/services/media/reel-preload-policy.js';
 	import { buildReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 	import { getNetworkProfileSnapshot, isSlowNetworkProfile, subscribeNetworkProfile } from '@/kernel/services/network/index.js';
@@ -105,7 +106,7 @@
 	import SvgIcon from '@/kernel/vue/components/icons/SvgIcon.vue';
 
 	export default defineComponent({
-		emits: ['double-tap', 'interaction', 'presentation-metadata'],
+		emits: ['double-tap', 'interaction', 'presentation-metadata', 'handoff-ready'],
 		props: {
 			mediaItem: {
 				type: Object,
@@ -114,6 +115,10 @@
 			postData: {
 				type: Object,
 				required: true
+			},
+			handoff: {
+				type: Object,
+				default: null
 			},
 			active: {
 				type: Boolean,
@@ -186,10 +191,13 @@
 			});
 
 			let hlsInstance = null;
+			let playbackController = null;
+			let transferredHlsListeners = [];
 			let hlsManifestReady = false;
 			let playbackGestureController = null;
 			let unsubscribeNetworkProfile = null;
 			let sponsoredVideoStarted = false;
+			let handoffReported = false;
 			let sponsoredThreeSecondView = false;
 			let sponsoredCompletedView = false;
 
@@ -212,6 +220,10 @@
 				return playbackSource.value.url || '';
 			});
 
+			const posterUrl = computed(() => {
+				return props.mediaItem?.thumbnail_url || props.mediaItem?.lqip_base64 || '';
+			});
+
 			const canRenderVideo = computed(() => {
 				return props.active || props.isNear;
 			});
@@ -219,6 +231,7 @@
 			const preloadPolicy = computed(() => getReelPreloadPolicy({
 				active: props.active,
 				isNext: props.isNext,
+				distanceFromActive: props.distanceFromActive,
 				networkProfile: state.networkProfile
 			}));
 
@@ -247,7 +260,7 @@
 				});
 
 				const showPosterCover = computed(() => {
-					return Boolean(props.mediaItem?.thumbnail_url)
+				return Boolean(posterUrl.value)
 						&& canRenderVideo.value
 						&& ! props.blocked
 						&& ! state.hasVisualFrame;
@@ -464,6 +477,11 @@
 						state.firstFrameMs = Math.max(0, Date.now() - state.playbackActivatedAt);
 					}
 
+					if(props.handoff && ! handoffReported) {
+						handoffReported = true;
+						context.emit('handoff-ready', props.mediaItem.id);
+					}
+
 					updatePlaybackReadiness(true);
 
 					if(props.active && ! props.blocked && ! state.manualPaused && ! state.showRetry && ! state.isPlaying) {
@@ -602,6 +620,16 @@
 
 			const destroyHlsInstance = () => {
 				hlsManifestReady = false;
+				transferredHlsListeners.forEach(({ event, listener }) => {
+					hlsInstance?.off?.(event, listener);
+				});
+				transferredHlsListeners = [];
+				if(playbackController) {
+					playbackController.destroy();
+					playbackController = null;
+					hlsInstance = null;
+					return;
+				}
 				if(hlsInstance) {
 					hlsInstance.destroy();
 					hlsInstance = null;
@@ -624,7 +652,7 @@
 				state.watchMsSinceFlush = 0;
 				state.loopCount = 0;
 				state.firstFrameMs = 0;
-				state.playbackActivatedAt = Date.now();
+				state.playbackActivatedAt = Number(props.handoff?.startedAt || Date.now());
 				state.lastPlaybackTime = 0;
 				state.bufferedBar = 0;
 				state.stallCount = 0;
@@ -653,7 +681,7 @@
 				}
 				resetPlaybackState(false);
 				state.resumePosition = resumePosition;
-				state.playbackActivatedAt = Date.now();
+				state.playbackActivatedAt = Number(props.handoff?.startedAt || Date.now());
 
 				nextTick(() => {
 					const videoElement = videoPlayerRef.value;
@@ -1008,10 +1036,71 @@
 				destroyHlsInstance();
 				state.nativeVideoUrl = '';
 				resetPlaybackState(false);
-				state.playbackActivatedAt = Date.now();
+				state.playbackActivatedAt = Number(props.handoff?.startedAt || Date.now());
 
 				if(! videoElement || ! source.url || ! shouldAttachPlaybackSource.value) {
 					return;
+				}
+
+				const transferredHandoff = props.handoff?.handoffToken
+					? takeReelPlaybackHandoff(props.handoff.handoffToken, props.mediaItem.id)
+					: null;
+				if(transferredHandoff) {
+					const controller = transferredHandoff.controller;
+					const instance = transferredHandoff.hlsInstance;
+					if(source.transport === 'hls' && source.url === transferredHandoff.source?.url && controller && instance) {
+						controller.setCallbacks({
+							onFatalError: () => markPlaybackTerminalError(),
+							onFallback: () => {
+								const fallback = getDirectPlaybackFallback(props.mediaItem);
+								state.forceMp4Fallback = Boolean(fallback?.url);
+								state.nativeVideoUrl = fallback?.url || '';
+								state.resumePosition = Number(videoElement.currentTime || transferredHandoff.currentTime || 0);
+								hlsInstance = null;
+								hlsManifestReady = false;
+								recordPlaybackMetric('media_fallback', 1, { rendition: 'mp4' });
+							},
+							onRendition: (shortEdge) => {
+								recordPlaybackMetric('media_rendition', shortEdge, { rendition: `${shortEdge}p` });
+							}
+						});
+						hlsInstance = instance;
+						playbackController = controller;
+						hlsManifestReady = true;
+						applyReelPreloadPolicy(instance, preloadPolicy.value);
+
+						const onTransferredFragmentBuffered = () => {
+							syncBuffered();
+							if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 1.8) {
+								instance.stopLoad();
+							}
+						};
+						instance.on(Hls.Events.FRAG_BUFFERED, onTransferredFragmentBuffered);
+						transferredHlsListeners.push({ event: Hls.Events.FRAG_BUFFERED, listener: onTransferredFragmentBuffered });
+
+						if(controller.attachTransferredMedia(transferredHandoff, videoElement)) {
+							nextTick(() => {
+								if(videoPlayerRef.value?.readyState >= 1) {
+									handleLoadedMetadata();
+								}
+								if(videoPlayerRef.value?.readyState >= 2) {
+									handleLoadedData();
+								}
+							});
+
+							return;
+						}
+
+						transferredHlsListeners.forEach(({ event, listener }) => instance.off?.(event, listener));
+						transferredHlsListeners = [];
+						playbackController = null;
+						hlsInstance = null;
+						hlsManifestReady = false;
+						controller.discardHandoff?.(transferredHandoff);
+					}
+					else {
+						controller?.discardHandoff?.(transferredHandoff);
+					}
 				}
 
 				const useHlsJs = shouldUseHlsJs(source, Hls);
@@ -1056,7 +1145,7 @@
 					});
 					instance.on(Hls.Events.FRAG_BUFFERED, () => {
 						syncBuffered();
-						if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 3.5) {
+						if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 1.8) {
 							hlsInstance?.stopLoad();
 						}
 					});
@@ -1227,6 +1316,7 @@
 				videoPlayerRef: videoPlayerRef,
 				state: state,
 				sourceUrl: sourceUrl,
+				posterUrl: posterUrl,
 					nativeVideoUrl: nativeVideoUrl,
 					videoPreload: videoPreload,
 					showBufferIndicator: showBufferIndicator,

@@ -145,6 +145,11 @@ test('a playback cache window fetches the current and next HLS manifest, variant
             variant: `${worker.origin}/next/360/index.m3u8`,
             segment: `${worker.origin}/next/360/segment.ts`,
         },
+        {
+            master: `${worker.origin}/next-two/master.m3u8`,
+            variant: `${worker.origin}/next-two/360/index.m3u8`,
+            segment: `${worker.origin}/next-two/360/segment.ts`,
+        },
     ];
 
     playback.forEach(({ master, variant }) => {
@@ -156,7 +161,7 @@ test('a playback cache window fetches the current and next HLS manifest, variant
         }));
     });
 
-    await worker.updateWindow([playback[0].master], [playback[1].master]);
+    await worker.updateWindow([playback[0].master], [playback[1].master, playback[2].master]);
 
     const requestedUrls = worker.requests.map((request) => request.url);
     const meta = await worker.mediaMeta();

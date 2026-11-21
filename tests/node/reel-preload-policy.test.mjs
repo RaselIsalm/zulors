@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getMinimumReelAutoBitrate, getPreferredReelLevelIndex, getReelPreloadPolicy } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
+import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getPreferredReelLevelIndex, getReelPreloadPolicy } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
 
 test('the next reel preloads one network-appropriate segment then keeps its buffer bounded', () => {
     assert.deepEqual(getReelPreloadPolicy({
@@ -18,8 +18,8 @@ test('the next reel preloads one network-appropriate segment then keeps its buff
         abrEwmaDefaultEstimate: 5_000_000,
         preferredShortEdge: 720,
         autoLevelCapping: -1,
-        maxBufferLength: 4,
-        maxMaxBufferLength: 4,
+        maxBufferLength: 3,
+        maxMaxBufferLength: 3,
     });
 });
 
@@ -27,13 +27,18 @@ test('the next reel is not prefetched offline or with data saver enabled', () =>
     for (const networkProfile of [
         { profile: 'offline', offline: true },
         { profile: 'very_slow', saveData: true },
-        { profile: 'slow', allowVideoPrefetch: false },
     ]) {
         const policy = getReelPreloadPolicy({ isNext: true, networkProfile });
         assert.equal(policy.prewarmingNext, false);
         assert.equal(policy.shouldWarm, false);
         assert.equal(policy.autoLevelCapping, -1);
     }
+});
+
+test('slow connections warm one upcoming reel and normal connections warm two', () => {
+    assert.equal(getReelPreloadPolicy({ distanceFromActive: 1, networkProfile: { profile: 'slow' } }).shouldWarm, true);
+    assert.equal(getReelPreloadPolicy({ distanceFromActive: 2, networkProfile: { profile: 'slow' } }).shouldWarm, false);
+    assert.equal(getReelPreloadPolicy({ distanceFromActive: 2, networkProfile: { profile: 'normal' } }).shouldWarm, true);
 });
 
 test('the active reel is not capped to the warmup rendition', () => {
@@ -52,21 +57,22 @@ test('the active reel is not capped to the warmup rendition', () => {
     assert.equal(policy.preferredShortEdge, 720);
 });
 
-test('startup quality starts at HD while retaining a higher rung for fast connections', () => {
+test('startup quality follows estimated throughput and can begin below HD', () => {
     const slow = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'slow' } });
     const fast = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'fast' } });
     const measured = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'normal', downlinkMbps: 5 } });
     const coarseLowDownlink = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'very_slow', downlinkMbps: 1.2 } });
 
     assert.equal(slow.startLevel, -1);
-    assert.equal(slow.abrEwmaDefaultEstimate, 5_000_000);
-    assert.equal(slow.preferredShortEdge, 720);
+	assert.equal(slow.abrEwmaDefaultEstimate, 1_800_000);
+	assert.equal(slow.preferredShortEdge, 360);
     assert.equal(fast.abrEwmaDefaultEstimate, 8_000_000);
     assert.equal(fast.preferredShortEdge, 1080);
-    assert.equal(measured.abrEwmaDefaultEstimate, 5_000_000);
+	assert.equal(measured.abrEwmaDefaultEstimate, 4_500_000);
     assert.equal(measured.preferredShortEdge, 720);
-    assert.equal(coarseLowDownlink.abrEwmaDefaultEstimate, 5_000_000);
-    assert.equal(coarseLowDownlink.preferredShortEdge, 720);
+	assert.equal(coarseLowDownlink.abrEwmaDefaultEstimate, 1_080_000);
+	assert.equal(coarseLowDownlink.preferredShortEdge, 360);
+	assert.equal(getReelPreloadPolicy({ active: true, networkProfile: { profile: 'very_slow' } }).preferredShortEdge, 240);
 });
 
 test('the initial HLS rendition selects the highest rung at or below the network target', () => {
@@ -97,7 +103,7 @@ test('portrait HLS levels select the network target by short edge instead of fra
     assert.equal(getPreferredReelLevelIndex(levels, 1080), 4);
 });
 
-test('automatic reel quality stays at or above the lowest available HD rendition', () => {
+test('automatic reel quality can step down after a conservative startup estimate', () => {
     const levels = [
         { width: 240, height: 426, bitrate: 700_000, maxBitrate: 800_000 },
         { width: 360, height: 640, bitrate: 1_100_000, maxBitrate: 1_300_000 },
@@ -107,16 +113,15 @@ test('automatic reel quality stays at or above the lowest available HD rendition
     ];
     const hls = { levels, startLevel: -1, config: { minAutoBitrate: 0 } };
 
-    assert.equal(getMinimumReelAutoBitrate(levels), 3_850_000);
     assert.deepEqual(applyReelStartupQualityPolicy(hls, 1080), {
         preferredLevel: 4,
-        minAutoBitrate: 3_850_000,
+		minAutoBitrate: 0,
     });
     assert.equal(hls.startLevel, 4);
-    assert.equal(hls.config.minAutoBitrate, 3_850_000);
+	assert.equal(hls.config.minAutoBitrate, 0);
 });
 
-test('the HD automatic quality floor is disabled when a source has no HD rendition', () => {
+test('automatic quality leaves the bitrate floor off when a source has no HD rendition', () => {
     const levels = [
         { width: 240, height: 426, bitrate: 700_000 },
         { width: 360, height: 640, bitrate: 1_100_000 },

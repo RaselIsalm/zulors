@@ -38,6 +38,7 @@
 			v-bind:key="mediaItem.id"
 					v-bind:mediaItem="mediaItem"
 					v-bind:postData="postData"
+			v-bind:handoff="playbackHandoff"
 					v-bind:active="active"
 					v-bind:isNear="isNear"
 					v-bind:isNext="isNext"
@@ -48,6 +49,7 @@
 			v-bind:sponsoredAdId="sponsoredAdId"
 					v-on:double-tap="handleDoubleTap"
 					v-on:interaction="handlePlaybackInteraction"
+			v-on:handoff-ready="clearPlaybackHandoff"
 					v-on:presentation-metadata="handlePresentationMetadata"
 				></ReelVideoPlayer>
 
@@ -273,6 +275,16 @@
 			const mediaItem = computed(() => {
 				return postData.value.relations?.media?.[0] || {};
 			});
+
+			const playbackHandoff = computed(() => {
+				return reelsStore.playbackHandoff?.mediaId == mediaItem.value.id
+					? reelsStore.playbackHandoff
+					: null;
+			});
+
+			const clearPlaybackHandoff = (mediaId) => {
+				reelsStore.clearPlaybackHandoff(mediaId);
+			};
 
 			const postUser = computed(() => {
 				return postData.value.relations?.user || {};
@@ -524,6 +536,8 @@
 				state: state,
 				postData: postData,
 				mediaItem: mediaItem,
+				playbackHandoff: playbackHandoff,
+				clearPlaybackHandoff: clearPlaybackHandoff,
 				postUser: postUser,
 				postLink: postLink,
 				postContent: postContent,

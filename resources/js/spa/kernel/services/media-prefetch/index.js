@@ -97,7 +97,7 @@ function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}
         current,
         next,
         preferredShortEdge: getReelPlaybackStartupPolicy(networkProfile).preferredShortEdge,
-        prefetch: !networkProfile.offline && !networkProfile.saveData && networkProfile.allowVideoPrefetch !== false
+        prefetch: !networkProfile.offline && !networkProfile.saveData
     };
     const worker = serviceWorker.controller;
 
@@ -168,8 +168,8 @@ function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
 			return state.count >= state.limit;
 		});
 
-        const playbackUrls = collectHlsPlaybackUrls(postsBatch, 2);
-        publishPlaybackCacheWindow(playbackUrls.slice(0, 1), playbackUrls.slice(1, 2), networkProfile);
+		const playbackUrls = collectHlsPlaybackUrls(postsBatch, isSlowNetworkProfile(networkProfile) ? 2 : 3);
+		publishPlaybackCacheWindow(playbackUrls.slice(0, 1), playbackUrls.slice(1, 3), networkProfile);
 	};
 
     if(options.immediate) {
@@ -198,7 +198,9 @@ function prefetchReelsPlaybackWindow(posts = [], activeIndex = 0) {
 
     const safeActiveIndex = Math.max(0, Math.min(posts.length - 1, Number(activeIndex || 0)));
     const activePost = posts[safeActiveIndex];
-    const nextPost = posts[safeActiveIndex + 1];
+    const profile = String(networkProfile.profile || 'normal');
+    const upcomingCount = ['slow', 'very_slow'].includes(profile) ? 1 : 2;
+    const upcomingPosts = posts.slice(safeActiveIndex + 1, safeActiveIndex + 1 + upcomingCount);
 
     const collectPostCacheUrls = (postData) => {
         const mediaItems = postData?.relations?.media || [];
@@ -215,7 +217,7 @@ function prefetchReelsPlaybackWindow(posts = [], activeIndex = 0) {
     };
 
     const currentUrls = collectPostCacheUrls(activePost);
-    const nextUrls = collectPostCacheUrls(nextPost);
+    const nextUrls = upcomingPosts.flatMap(collectPostCacheUrls);
 
     publishPlaybackCacheWindow(currentUrls, nextUrls, networkProfile);
 }

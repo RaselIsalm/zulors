@@ -257,7 +257,9 @@
 
 				const distanceToBottom = scroller.scrollHeight - (scroller.scrollTop + scroller.clientHeight);
 
-				if(! force && distanceToBottom > (scroller.clientHeight * 4)) {
+				const lookaheadScreens = ['slow', 'very_slow'].includes(state.networkProfile.profile) ? 8 : 5;
+
+				if(! force && distanceToBottom > (scroller.clientHeight * lookaheadScreens)) {
 					return;
 				}
 

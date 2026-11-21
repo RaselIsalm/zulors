@@ -219,8 +219,9 @@
 				}
 
 				const remaining = scroller.scrollHeight - (scroller.scrollTop + scroller.clientHeight);
+				const lookaheadScreens = ['slow', 'very_slow'].includes(state.networkProfile.profile) ? 8 : 5;
 
-				if(! force && remaining > scroller.clientHeight * 4) {
+				if(! force && remaining > scroller.clientHeight * lookaheadScreens) {
 					return;
 				}
 

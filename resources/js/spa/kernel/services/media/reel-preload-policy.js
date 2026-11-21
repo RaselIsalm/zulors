@@ -5,7 +5,7 @@ const DEFAULT_ABR_ESTIMATES = {
     normal: 5_000_000,
     fast: 8_000_000,
 };
-const HD_STARTUP_ESTIMATE = 5_000_000;
+const MIN_STARTUP_ESTIMATE = 500_000;
 
 export function getReelPlaybackStartupPolicy(networkProfile = {}) {
     const profile = String(networkProfile.profile || 'normal');
@@ -19,11 +19,20 @@ export function getReelPlaybackStartupPolicy(networkProfile = {}) {
     // Network Information API downlink is a coarse estimate, not measured
     // throughput. Use it only to choose whether to start above HD; HLS.js will
     // adapt down after it measures actual segment throughput.
-    const defaultEstimate = Math.max(HD_STARTUP_ESTIMATE, networkEstimate);
+	const defaultEstimate = Math.max(MIN_STARTUP_ESTIMATE, networkEstimate);
+	const preferredShortEdge = defaultEstimate < 1_000_000
+		? 240
+		: defaultEstimate < 2_000_000
+			? 360
+			: defaultEstimate < 3_500_000
+				? 480
+				: defaultEstimate < 6_800_000
+					? 720
+					: 1080;
 
     return {
         abrEwmaDefaultEstimate: defaultEstimate,
-        preferredShortEdge: defaultEstimate >= 7_800_000 ? 1080 : 720,
+		preferredShortEdge,
     };
 }
 
@@ -56,41 +65,22 @@ export function getPreferredReelLevelIndex(levels = [], preferredShortEdge = 720
     return atOrBelowTarget[atOrBelowTarget.length - 1]?.index ?? -1;
 }
 
-export function getMinimumReelAutoBitrate(levels = [], minimumShortEdge = 720) {
-    if(! Array.isArray(levels) || levels.length === 0) {
-        return 0;
-    }
-
-    const hdLevels = levels
-        .map((level) => {
-            const width = Number(level?.width || 0);
-            const height = Number(level?.height || 0);
-
-            return {
-                shortEdge: width > 0 && height > 0 ? Math.min(width, height) : height,
-                bitrate: Number(level?.maxBitrate || level?.bitrate || 0),
-            };
-        })
-        .filter((level) => level.shortEdge >= minimumShortEdge && level.bitrate > 0)
-        .sort((left, right) => left.shortEdge - right.shortEdge || left.bitrate - right.bitrate);
-
-    return hdLevels[0]?.bitrate ?? 0;
-}
-
 export function applyReelStartupQualityPolicy(hlsInstance, preferredShortEdge = 720) {
     if(! hlsInstance) {
-        return { preferredLevel: -1, minAutoBitrate: 0 };
+		return { preferredLevel: -1, minAutoBitrate: 0 };
     }
 
     const preferredLevel = getPreferredReelLevelIndex(hlsInstance.levels || [], preferredShortEdge);
-    const minAutoBitrate = getMinimumReelAutoBitrate(hlsInstance.levels || []);
+	// Let ABR move below the startup rung when actual throughput is lower than
+	// the browser's coarse network estimate. This avoids pinning slow users to HD.
+	const minAutoBitrate = 0;
 
     if(preferredLevel >= 0) {
         hlsInstance.startLevel = preferredLevel;
     }
 
-    // Keep automatic switching within HD once an HD rendition is available.
-    // Smaller sources have no HD rung, so their ABR range stays unrestricted.
+    // Leave the full ladder available so measured throughput can step below
+    // the selected startup rung without buffering.
     if(hlsInstance.config) {
         hlsInstance.config.minAutoBitrate = minAutoBitrate;
     }
@@ -98,9 +88,10 @@ export function applyReelStartupQualityPolicy(hlsInstance, preferredShortEdge = 
     return { preferredLevel, minAutoBitrate };
 }
 
-export function getReelPreloadPolicy({ active = false, isNext = false, networkProfile = {} } = {}) {
-    const mayPrefetch = !networkProfile.offline && !networkProfile.saveData && networkProfile.allowVideoPrefetch !== false;
-    const prewarmingNext = !active && isNext && mayPrefetch;
+export function getReelPreloadPolicy({ active = false, isNext = false, distanceFromActive = isNext ? 1 : 0, networkProfile = {} } = {}) {
+	const mayPrefetch = !networkProfile.offline && !networkProfile.saveData;
+	const lookaheadLimit = networkProfile.profile === 'slow' || networkProfile.profile === 'very_slow' ? 1 : 2;
+	const prewarmingNext = !active && distanceFromActive > 0 && distanceFromActive <= lookaheadLimit && mayPrefetch;
     const startupPolicy = getReelPlaybackStartupPolicy(networkProfile);
 
     return {
@@ -110,8 +101,8 @@ export function getReelPreloadPolicy({ active = false, isNext = false, networkPr
         abrEwmaDefaultEstimate: startupPolicy.abrEwmaDefaultEstimate,
         preferredShortEdge: startupPolicy.preferredShortEdge,
         autoLevelCapping: -1,
-        maxBufferLength: prewarmingNext ? 4 : Number(networkProfile.reelsMaxBufferLength || 16),
-        maxMaxBufferLength: prewarmingNext ? 4 : Number(networkProfile.reelsMaxMaxBufferLength || 24),
+		maxBufferLength: prewarmingNext ? 3 : Number(networkProfile.reelsMaxBufferLength || 16),
+		maxMaxBufferLength: prewarmingNext ? 3 : Number(networkProfile.reelsMaxMaxBufferLength || 24),
     };
 }
 

@@ -76,6 +76,7 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 			directSponsoredEntry: false,
 			warmPromise: null,
 			entryPostHashId: '',
+			playbackHandoff: null,
 			filter: {
 				page: 1,
 				seed_hash_id: '',
@@ -109,7 +110,8 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 				this.entryPostHashId = '';
 
 				const warmedPosts = await this.prefetchFirstPage(nextSeedHashId, {
-					refreshReason: 'post_entry'
+					refreshReason: 'post_entry',
+					force: true
 				}).catch(() => []);
 
 				if(warmedPosts.length) {
@@ -157,6 +159,7 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 			};
 			this.directSponsoredEntry = false;
 			this.entryPostHashId = '';
+			this.playbackHandoff = null;
 
 			this.startFeedSession('initial');
 			this.swipeCount = 0;
@@ -168,7 +171,7 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 				this.posts = [];
 			}
 		},
-		primeWithPost: function(postData) {
+		primeWithPost: function(postData, playbackState = {}) {
 			const seedHashId = normalizeSeedHash(postData?.hash_id);
 
 			if(! seedHashId || ! postData?.id) {
@@ -178,7 +181,23 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 			this.reset(seedHashId, false);
 			this.posts = [postData];
 			this.entryPostHashId = seedHashId;
+			this.playbackHandoff = {
+				postId: postData.id,
+				mediaId: playbackState.mediaId || postData.relations?.media?.[0]?.id || null,
+				handoffToken: playbackState.handoffToken || '',
+				startedAt: Number(playbackState.startedAt || Date.now()),
+				wasPlaying: Boolean(playbackState.wasPlaying),
+			};
 			prefetchReelsPlaybackWindow(this.posts, 0);
+
+			return true;
+		},
+		clearPlaybackHandoff: function(mediaId = null) {
+			if(mediaId && this.playbackHandoff?.mediaId && this.playbackHandoff.mediaId != mediaId) {
+				return false;
+			}
+
+			this.playbackHandoff = null;
 
 			return true;
 		},
@@ -252,7 +271,9 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 			}).getFrom('feed').then((response) => {
 				const posts = prioritizeIncomingPosts(response.data.data || [], normalizedSeedHashId);
 
-				this.applyFeedMeta(response?.data?.meta, false);
+				if(this.filter.seed_hash_id === normalizedSeedHashId) {
+					this.applyFeedMeta(response?.data?.meta);
+				}
 				writeCache(cacheKey, posts.slice(0, reelsCacheLimit));
 				prefetchReelsPlaybackWindow(posts, 0);
 
