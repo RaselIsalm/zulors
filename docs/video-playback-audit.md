@@ -51,6 +51,11 @@ HTML requests do not measure video API or media delivery latency.
   within ten seconds, the player selects the highest rendition supported by
   its measured throughput. Sources without HD use their highest available
   level.
+- Startup no longer forces the 720p rung when the measured/coarse throughput
+  cannot sustain it. When the requested rung needs more than 1.25 times the
+  available estimate, startup selects the highest sustainable rung immediately;
+  this prevents slow connections from waiting through the HD deadline before
+  showing a first frame, while normal and fast connections still target 720p.
 - Feed and active Reels wait for five seconds of buffered media before the
   first play request is allowed to start. The existing poster remains visible
   during this wait; direct MP4 fallback can start on a decoded frame after the

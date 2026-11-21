@@ -140,6 +140,7 @@ test('automatic reel quality can step down after a conservative startup estimate
 
     assert.deepEqual(applyReelStartupQualityPolicy(hls, 1080), {
         preferredLevel: 4,
+		requestedLevel: 4,
 		minAutoBitrate: 0,
     });
     assert.equal(hls.startLevel, 4);
@@ -156,10 +157,28 @@ test('automatic quality leaves the bitrate floor off when a source has no HD ren
 
     assert.deepEqual(applyReelStartupQualityPolicy(hls, 720), {
         preferredLevel: 2,
+		requestedLevel: 2,
         minAutoBitrate: 0,
     });
     assert.equal(hls.startLevel, 2);
     assert.equal(hls.config.minAutoBitrate, 0);
+});
+
+test('slow startup selects a sustainable rung instead of forcing an HD timeout', () => {
+	const levels = [
+		{ width: 240, height: 426, bitrate: 700_000 },
+		{ width: 360, height: 640, bitrate: 1_100_000 },
+		{ width: 480, height: 854, bitrate: 2_000_000 },
+		{ width: 720, height: 1280, bitrate: 3_600_000 },
+	];
+	const hls = { levels, startLevel: -1, config: { minAutoBitrate: 1_100_000 } };
+
+	assert.deepEqual(applyReelStartupQualityPolicy(hls, 720, 1_800_000), {
+		preferredLevel: 1,
+		requestedLevel: 3,
+		minAutoBitrate: 0,
+	});
+	assert.equal(hls.startLevel, 1);
 });
 
 test('activating the warmed reel updates its adaptive estimate and expands the HLS buffer', () => {

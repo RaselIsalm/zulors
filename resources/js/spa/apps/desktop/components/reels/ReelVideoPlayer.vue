@@ -1212,7 +1212,7 @@
 						}
 
 						hlsManifestReady = true;
-						applyReelStartupQualityPolicy(instance, preloadPolicy.value.preferredShortEdge);
+						applyReelStartupQualityPolicy(instance, preloadPolicy.value.preferredShortEdge, instance.abrEwmaDefaultEstimate);
 						if(state.startupQualityFallbackApplied) {
 							chooseSustainableStartupLevel();
 						}

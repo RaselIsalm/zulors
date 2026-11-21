@@ -197,7 +197,8 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			manifestReady = true;
 			applyReelStartupQualityPolicy(
 				instance,
-				getReelPlaybackStartupPolicy(getNetworkProfile()).preferredShortEdge
+				getReelPlaybackStartupPolicy(getNetworkProfile()).preferredShortEdge,
+				instance.abrEwmaDefaultEstimate
 			);
 
 			if(loadRequested) {

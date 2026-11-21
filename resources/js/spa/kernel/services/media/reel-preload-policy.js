@@ -97,23 +97,38 @@ export function getSustainableReelLevelIndex(levels = [], bandwidthEstimate = 0,
 	return (sustainable[sustainable.length - 1] || usableLevels[0]).index;
 }
 
-export function applyReelStartupQualityPolicy(hlsInstance, preferredShortEdge = 720) {
+export function applyReelStartupQualityPolicy(hlsInstance, preferredShortEdge = 720, bandwidthEstimate = 0) {
 	if(! hlsInstance) {
 		return { preferredLevel: -1, minAutoBitrate: 0 };
 	}
 
-	const preferredLevel = getPreferredReelLevelIndex(hlsInstance.levels || [], preferredShortEdge);
+	const levels = hlsInstance.levels || [];
+	const preferredLevel = getPreferredReelLevelIndex(levels, preferredShortEdge);
+	const preferredBitrate = preferredLevel >= 0
+		? Number(levels[preferredLevel]?.bitrate || levels[preferredLevel]?.maxBitrate || 0)
+		: 0;
+	const estimate = Number(bandwidthEstimate || hlsInstance.bandwidthEstimate || hlsInstance.abrEwmaDefaultEstimate || 0);
+	// A 720p-first request is useful on normal/fast networks, but forcing a
+	// rung that needs materially more bandwidth than the measured connection
+	// makes startup slower than the quality gain. Pick the highest sustainable
+	// rung only when the preferred rung cannot be sustained with headroom.
+	const startupLevel = preferredLevel >= 0
+		&& preferredBitrate > 0
+		&& estimate > 0
+		&& preferredBitrate > estimate * 1.25
+		? getSustainableReelLevelIndex(levels, estimate)
+		: preferredLevel;
 	const minAutoBitrate = 0;
 
-	if(preferredLevel >= 0) {
-		hlsInstance.startLevel = preferredLevel;
+	if(startupLevel >= 0) {
+		hlsInstance.startLevel = startupLevel;
 	}
 
 	if(hlsInstance.config) {
 		hlsInstance.config.minAutoBitrate = minAutoBitrate;
 	}
 
-	return { preferredLevel, minAutoBitrate };
+	return { preferredLevel: startupLevel, requestedLevel: preferredLevel, minAutoBitrate };
 }
 
 export function applyReelPreloadPolicy(hlsInstance, policy) {
