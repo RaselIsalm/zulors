@@ -5,7 +5,7 @@ import { NativePublicationBridge } from '../../resources/js/spa/kernel/services/
 import { directAssetImageUpload } from '../../resources/js/spa/kernel/services/media/r2-direct-asset-upload.js';
 import { prepareMediaFile, prepareVideoFile } from '../../resources/js/spa/kernel/services/media/prepare-media-file.js';
 import { transferItem, uploadPart } from '../../resources/js/spa/kernel/services/media/publications/transfer.js';
-import { isPublicationMedia, publicationMediaMime, publicationMediaType, releasePublicationSelection, selectPublicationMedia } from '../../resources/js/spa/kernel/services/media/publications/selection.js';
+import { isPublicationMedia, materializePublicationFile, publicationMediaMime, publicationMediaType, releasePublicationSelection, selectPublicationMedia } from '../../resources/js/spa/kernel/services/media/publications/selection.js';
 
 class MemoryDatabase {
     rows = new Map(); files = new Map();
@@ -71,6 +71,21 @@ test('InvalidBlob storage retries with a materialized Blob and keeps the selecte
     assert.equal(attempts, 2);
     assert.equal(await file.text(), 'test');
     assert.equal(file.type, 'image/png');
+});
+
+test('selected picker files are copied while permission is available', async () => {
+    const original = new File(['picker-video'], 'camera.mp4', { type: 'video/mp4' });
+    const stable = await materializePublicationFile(original, 'video/mp4');
+
+    assert.notEqual(stable, original);
+    assert.equal(stable.name, 'camera.mp4');
+    assert.equal(stable.type, 'video/mp4');
+    assert.equal(await stable.text(), 'picker-video');
+
+    const selection = await selectPublicationMedia(original, '1');
+    assert.notEqual(selection.file, original);
+    assert.equal(await selection.file.text(), 'picker-video');
+    releasePublicationSelection(selection);
 });
 
 test('feature disabled, unsupported privacy and GIF cannot enter the new path', async () => {

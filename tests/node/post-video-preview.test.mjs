@@ -104,6 +104,9 @@ async function editorHarness(platform, { fallback = false, fail = false } = {}) 
             options.onStage({ stage: 'preparing', progress: 40 });
             return { file, prepared: false, reason: 'device_encoder_unavailable', cleanup: async () => {} };
         } }],
+        ['@/kernel/services/media/publications/selection.js', {
+            materializePublicationFile: async file => file,
+        }],
         ['@/kernel/vue/composables/media-preview-bounds.js', {
             useMediaPreviewBounds: () => ({ bounds: vue.ref({ width: 390, height: 600 }), refresh() {} }),
         }],

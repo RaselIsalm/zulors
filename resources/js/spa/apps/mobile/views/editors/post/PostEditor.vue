@@ -88,6 +88,7 @@
 	import { useInputHandlers } from '@/kernel/vue/composables/input/index.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { applyVideoPresentationMetadata, buildVideoPresentationMetadata, readVideoFileMetadata } from '@/kernel/services/media/video-metadata.js';
+	import { materializePublicationFile } from '@/kernel/services/media/publications/selection.js';
 	import { mergePostMediaPreviews } from '@/kernel/services/media/post-media-preview.js';
 	import { createMultipartUploadProgress, uploadMultipartPartsAdaptive } from '@/kernel/services/media/multipart-upload-progress.js';
 	import { queueMetric } from '@/kernel/services/performance/index.js';
@@ -799,7 +800,15 @@
 						return;
 					}
 				} catch (error) { validatePost(error.message); return; }
-				if(type === 'video') return uploadVideoDirectly(mediaFile);
+				if(type === 'video') {
+					try {
+						return uploadVideoDirectly(await materializePublicationFile(mediaFile, mediaFile.type || 'video/mp4'));
+					}
+					catch (error) {
+						validatePost(error.message);
+						return;
+					}
+				}
 				validatePost('Direct R2 media publishing is unavailable for this account. The file was not sent to the application server.');
 				resetFileInputTags();
 			}

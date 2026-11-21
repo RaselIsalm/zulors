@@ -55,12 +55,38 @@ export function publicationMediaType(file) {
 
 export function isPublicationMedia(file) { return Boolean(publicationMediaType(file)) && !/\.gif$/i.test(file?.name || ''); }
 
+// Android document providers can return a File whose backing permission expires
+// while the editor remains open. Copy the bytes while the picker grant is live
+// so IndexedDB retries and later uploads never depend on that stale handle.
+export async function materializePublicationFile(file, mime = '') {
+    if (!file || file.native_file_id || !(file instanceof Blob)) return file;
+
+    try {
+        const bytes = await file.arrayBuffer();
+        const name = file.name || 'media.bin';
+        const type = mime || file.type || 'application/octet-stream';
+
+        if (typeof File === 'function') {
+            return new File([bytes], name, {
+                type,
+                lastModified: Number(file.lastModified) || Date.now(),
+            });
+        }
+
+        return new Blob([bytes], { type });
+    }
+    catch (error) {
+        throw new Error('The selected file could not be read. Keep the picker permission active and select it again.');
+    }
+}
+
 export async function selectPublicationMedia(file, account = null) {
     if (!isPublicationMedia(file)) throw new Error('Select a photo or video.');
     const mime = publicationMediaMime(file);
     const type = publicationMediaType(file);
     const native = Boolean(file.native_file_id);
-    const url = native ? file.preview_url || '' : URL.createObjectURL(file);
+    const stableFile = native ? file : await materializePublicationFile(file, mime);
+    const url = native ? file.preview_url || '' : URL.createObjectURL(stableFile);
     const metadata = {};
     const client_uid = crypto.randomUUID();
     const seconds = Math.max(0, Math.ceil(file.duration_seconds || 0));
@@ -72,7 +98,7 @@ export async function selectPublicationMedia(file, account = null) {
     return {
         id: client_uid, client_uid, type, mime, size: file.size, account,
         name: file.name || ({ video: 'video.mp4', image: 'image.jpg', audio: 'audio.webm', document: 'document.pdf' }[type] || 'media.bin'),
-        ...(native ? { native_file_id: file.native_file_id } : { file }),
+        ...(native ? { native_file_id: file.native_file_id } : { file: stableFile }),
         duration_seconds: file.duration_seconds || null,
         width: presentationMetadata.dimensions?.width, height: presentationMetadata.dimensions?.height,
         source_url: url, preview_url: url, thumbnail_url: '', is_local_preview: true,
