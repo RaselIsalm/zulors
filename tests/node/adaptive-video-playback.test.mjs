@@ -95,6 +95,37 @@ test('adaptive playback starts at HD on coarse slow network hints and retains AB
     controller.destroy();
 });
 
+test('adaptive playback prefers HLS.js over native HLS when controllable ABR is available', () => {
+    FakeHls.instances = [];
+    const video = createVideoElement();
+    video.canPlayType = (type) => type.includes('mpegurl') ? 'maybe' : '';
+    const controller = createAdaptiveVideoPlaybackController(video, { HlsClass: FakeHls });
+
+    controller.attach(hlsSource, mp4Source);
+
+    assert.equal(FakeHls.instances.length, 1);
+    assert.equal(video.src, '');
+    FakeHls.instances[0].trigger(FakeHls.Events.MANIFEST_PARSED);
+    assert.equal(FakeHls.instances[0].startLevel, 3);
+    controller.destroy();
+});
+
+test('native HLS remains available when HLS.js is unsupported', () => {
+    FakeHls.instances = [];
+    class NativeOnlyHls extends FakeHls {
+        static isSupported() { return false; }
+    }
+    const video = createVideoElement();
+    video.canPlayType = (type) => type.includes('mpegurl') ? 'maybe' : '';
+    const controller = createAdaptiveVideoPlaybackController(video, { HlsClass: NativeOnlyHls });
+
+    controller.attach(hlsSource, mp4Source);
+
+    assert.equal(NativeOnlyHls.instances.length, 0);
+    assert.equal(video.src, hlsSource.url);
+    controller.destroy();
+});
+
 test('normal feed playback starts from an HD-capable bandwidth estimate', () => {
     const options = hlsOptionsFor({ profile: 'normal' });
 

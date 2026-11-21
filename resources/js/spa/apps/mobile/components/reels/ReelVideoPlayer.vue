@@ -93,7 +93,7 @@
 	import { computed, defineComponent, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 	import Hls from 'hls.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
-	import { buildAdaptiveVideoSource, canVideoElementPlayNatively, getDirectPlaybackFallback } from '@/kernel/services/media/adaptive-video/index.js';
+	import { buildAdaptiveVideoSource, getDirectPlaybackFallback, shouldUseHlsJs } from '@/kernel/services/media/adaptive-video/index.js';
 	import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getReelPreloadPolicy } from '@/kernel/services/media/reel-preload-policy.js';
 	import { buildReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 	import { getNetworkProfileSnapshot, isSlowNetworkProfile, subscribeNetworkProfile } from '@/kernel/services/network/index.js';
@@ -675,7 +675,8 @@
 
 					if(hlsInstance) {
 						if(isSlowNetworkProfile(state.networkProfile) && Number.isInteger(hlsInstance.currentLevel) && hlsInstance.currentLevel > 0) {
-							hlsInstance.nextLevel = Math.max(0, hlsInstance.currentLevel - 1);
+							const minimumLevel = Number.isInteger(hlsInstance.minAutoLevel) ? hlsInstance.minAutoLevel : 0;
+							hlsInstance.nextLevel = Math.max(minimumLevel, hlsInstance.currentLevel - 1);
 						}
 
 						try {
@@ -987,11 +988,9 @@
 					return;
 				}
 
-				const shouldUseHlsJs = source.transport === 'hls'
-					&& Hls.isSupported()
-					&& ! canVideoElementPlayNatively(videoElement, source.type);
+				const useHlsJs = shouldUseHlsJs(source, Hls);
 
-				if(shouldUseHlsJs) {
+				if(useHlsJs) {
 					videoElement.removeAttribute('src');
 					videoElement.load();
 

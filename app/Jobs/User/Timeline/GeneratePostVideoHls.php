@@ -23,8 +23,10 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public const ENCODING_VERSION = 'v5';
+    public const ENCODING_VERSION = 'v6';
     public const SEGMENT_DURATION_SECONDS = 2;
+    private const HD_SHORT_EDGE = 720;
+    private const HD_SOURCE_TOLERANCE = 0.01;
 
     public int $tries = 5;
     public int $timeout = 21600;
@@ -42,10 +44,12 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     public static function renditionShortEdgesForSource(int $sourceWidth, int $sourceHeight): array
     {
         $sourceShortEdge = min($sourceWidth, $sourceHeight);
+        $minimumHdSourceShortEdge = (int) ceil(self::HD_SHORT_EDGE * (1 - self::HD_SOURCE_TOLERANCE));
 
         return array_values(array_filter(
             array_keys(self::LADDER),
             static fn (int $shortEdge): bool => $shortEdge <= $sourceShortEdge
+                || ($shortEdge === self::HD_SHORT_EDGE && $sourceShortEdge >= $minimumHdSourceShortEdge)
         ));
     }
 
@@ -53,6 +57,11 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     {
         $sourceShortEdge = min($sourceWidth, $sourceHeight);
         $scale = min(1, $shortEdge / max(1, $sourceShortEdge));
+        $minimumHdSourceShortEdge = (int) ceil(self::HD_SHORT_EDGE * (1 - self::HD_SOURCE_TOLERANCE));
+
+        if ($shortEdge === self::HD_SHORT_EDGE && $sourceShortEdge >= $minimumHdSourceShortEdge) {
+            $scale = $shortEdge / $sourceShortEdge;
+        }
 
         return [
             'width' => max(2, 2 * (int) round(($sourceWidth * $scale) / 2)),

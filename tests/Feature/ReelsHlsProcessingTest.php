@@ -29,15 +29,20 @@ class ReelsHlsProcessingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_hls_rendition_ladder_uses_the_source_short_edge_without_upscaling(): void
+    public function test_hls_rendition_ladder_uses_the_source_short_edge_and_normalizes_near_hd_sources(): void
     {
         $this->assertSame(2, GeneratePostVideoHls::SEGMENT_DURATION_SECONDS);
         $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(720, 1280));
         $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(1280, 720));
+        $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(716, 1274));
+        $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(1275, 718));
+        $this->assertSame([240, 360, 480], GeneratePostVideoHls::renditionShortEdgesForSource(712, 1260));
         $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionShortEdgesForSource(1080, 1920));
         $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionShortEdgesForSource(3840, 2160));
         $this->assertSame([], GeneratePostVideoHls::renditionShortEdgesForSource(180, 320));
         $this->assertSame(['width' => 720, 'height' => 1280], GeneratePostVideoHls::renditionDimensions(720, 1280, 720));
+        $this->assertSame(['width' => 720, 'height' => 1282], GeneratePostVideoHls::renditionDimensions(716, 1274, 720));
+        $this->assertSame(['width' => 1278, 'height' => 720], GeneratePostVideoHls::renditionDimensions(1275, 718, 720));
         $this->assertSame(['width' => 1080, 'height' => 1920], GeneratePostVideoHls::renditionDimensions(1080, 1920, 1080));
         $this->assertSame(['width' => 1280, 'height' => 720], GeneratePostVideoHls::renditionDimensions(1920, 1080, 720));
         $this->assertSame(3400000, GeneratePostVideoHls::renditionProfile(720)['video']);

@@ -6,9 +6,10 @@ thumbnail, then queues HLS. When HLS processing is enabled,
 `GeneratePostVideoHls` uses the exact archived upload when it is available, so
 adaptive renditions do not re-encode the already lossy playback MP4. If an
 archive is unavailable, it falls back to the playable MP4. The job creates a
-master playlist plus 240p, 360p, 480p, 720p and 1080p renditions, capped at the
-source short edge so portrait and landscape videos use the same quality labels
-without upscaling. It preserves source aspect ratio and frame rate. Each master
+master playlist plus 240p, 360p, 480p, 720p and 1080p renditions. Renditions are
+capped at the source short edge, except a source within 1% of 720p is normalized
+to a 720p rung to account for small camera/crop dimension offsets. It preserves
+source aspect ratio and frame rate. Each master
 variant reports its encoded resolution, frame rate, codecs, measured average
 bandwidth and segment-measured peak bandwidth. The default native-HLS variant
 is the highest available rung up to 720p; HLS.js starts at an HD rung before
@@ -24,8 +25,10 @@ Cloudflare cached custom domain (`media.zulors.com`). Playlists and segments
 receive `public, max-age=31536000, immutable` cache headers. R2 serves byte
 ranges for direct MP4 requests; the service worker passes range requests through
 instead of storing incomplete media responses. The web and mobile feed players
-prefer HLS, use HLS.js where native HLS is unavailable, and fall back to the
-MP4 if adaptive playback cannot start.
+prefer HLS.js whenever Media Source Extensions are available so the startup
+level and HD floor apply even when the browser also advertises native HLS. Native
+HLS is used when HLS.js is unavailable; the player falls back to MP4 if adaptive
+playback cannot start.
 
 The final bucket (`zulors-media-final`) must allow cross-origin `GET` and
 `HEAD` playback from the website origins and allow the `Range` request header.
@@ -50,8 +53,9 @@ Native playback uses metadata preloading. Reels keep the next rendition and
 buffer bounded. Active playback starts at 720p (or the highest available rung
 below it), and at 1080p when the coarse network estimate supports it. The
 browser's Network Information `downlink` hint does not lower the startup rung;
-HLS.js adapts through the full ladder after measuring segment throughput. Reel
-players do not cap HLS by their CSS box dimensions, which can be smaller than
+HLS.js adapts through the full ladder after measuring segment throughput while
+respecting the HD floor. Stall recovery also stays at or above the lowest HD
+level when one is present. Reel players do not cap HLS by their CSS box dimensions, which can be smaller than
 the video's intended HD resolution. Off-screen feed players pause and stop HLS downloads while keeping
 their attached source and decoded frame. Reels keep loaded nearby sources and
 release them outside the preload window. The feed playback arbiter allows one

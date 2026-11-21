@@ -1,7 +1,7 @@
 import Hls from 'hls.js';
 import { getNetworkProfileSnapshot } from '../../network/index.js';
 import { applyReelStartupQualityPolicy, getReelPlaybackStartupPolicy } from '../reel-preload-policy.js';
-import { canVideoElementPlayNatively, HLS_CONTENT_TYPE } from './index.js';
+import { canVideoElementPlayNatively, HLS_CONTENT_TYPE, shouldUseHlsJs } from './index.js';
 
 export const hlsOptionsFor = (networkProfile) => ({
 	autoStartLoad: false,
@@ -72,11 +72,11 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 
 		const canUseNativeHls = nextSource.transport === 'hls'
 			&& canVideoElementPlayNatively(videoElement, nextSource.type || HLS_CONTENT_TYPE);
-		const shouldUseHlsJs = nextSource.transport === 'hls'
-			&& ! canUseNativeHls
-			&& Boolean(HlsClass?.isSupported?.());
+		// Prefer HLS.js whenever MSE is available so startLevel and the HD
+		// bitrate floor also apply on browsers that advertise native HLS.
+		const useHlsJs = shouldUseHlsJs(nextSource, HlsClass);
 
-		if(nextSource.transport === 'hls' && ! canUseNativeHls && ! shouldUseHlsJs) {
+		if(nextSource.transport === 'hls' && ! canUseNativeHls && ! useHlsJs) {
 			if(! fallbackSource) {
 				options.onFatalError?.({ type: 'unsupported_hls', fatal: true });
 				return false;
@@ -89,7 +89,7 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			return attach(directSource);
 		}
 
-		if(! shouldUseHlsJs) {
+		if(! useHlsJs) {
 			videoElement.preload = 'metadata';
 			if(canUseNativeHls && fallbackSource) {
 				nativeErrorHandler = () => {

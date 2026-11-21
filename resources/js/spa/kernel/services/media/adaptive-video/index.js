@@ -79,6 +79,10 @@ function canVideoElementPlayNatively(videoElement, contentType = '') {
 	return Boolean(videoElement.canPlayType(contentType));
 }
 
+function shouldUseHlsJs(source, HlsClass) {
+	return source?.transport === 'hls' && Boolean(HlsClass?.isSupported?.());
+}
+
 function getDirectPlaybackFallback(mediaItem = {}) {
 	const previewUrl = asUrl(mediaItem.preview_url);
 	const sourceUrl = asUrl(mediaItem.source_url);
@@ -109,5 +113,6 @@ export {
 	isDashUrl,
 	buildAdaptiveVideoSource,
 	canVideoElementPlayNatively,
+	shouldUseHlsJs,
 	getDirectPlaybackFallback
 };
