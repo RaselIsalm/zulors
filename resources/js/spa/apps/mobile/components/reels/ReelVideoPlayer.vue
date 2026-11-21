@@ -225,7 +225,7 @@
 			});
 
 			const shouldAttachPlaybackSource = computed(() => {
-				return canRenderVideo.value && ! props.blocked && shouldWarmPlayback.value;
+				return canRenderVideo.value && ! props.blocked && (shouldWarmPlayback.value || state.hasVisualFrame);
 			});
 
 			const nativeVideoUrl = computed(() => {

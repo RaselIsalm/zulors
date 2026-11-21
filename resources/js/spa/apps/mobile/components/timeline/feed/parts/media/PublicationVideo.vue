@@ -13,6 +13,7 @@
 			<img v-if="posterUrl" v-bind:src="posterUrl" alt="" aria-hidden="true" v-bind:loading="isPriority ? 'eager' : 'lazy'" v-bind:fetchpriority="isPriority ? 'high' : 'auto'" decoding="async" class="pointer-events-none absolute inset-0 size-full object-cover">
 			<VideoPlayer
 				v-if="isNearViewport"
+				v-bind:key="mediaItem.id"
 				v-bind:postId="mediaItem.mediaable_id"
 				v-bind:mediaId="mediaItem.id"
 				v-bind:mediaItem="mediaItem"
@@ -54,7 +55,7 @@
 			}
 		},
 		setup: function(props) {
-			const { targetRef: mediaViewportRef, isNearViewport } = useNearViewport({ rootMargin: '500px 0px' });
+			const { targetRef: mediaViewportRef, isNearViewport } = useNearViewport({ rootMargin: '1200px 0px' });
 			const timelineStore = useTimelineStore();
 			const authStore = useAuthStore();
 			const mediaItem = computed(() => {

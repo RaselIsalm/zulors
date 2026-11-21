@@ -148,3 +148,23 @@ test('suspended off-screen playback releases HLS and restores its position on re
     assert.ok(FakeHls.instances[1].calls.some(([name]) => name === 'startLoad'));
     controller.destroy();
 });
+
+test('off-screen pause can keep the attached HLS instance and resume loading without resetting its buffer', () => {
+    FakeHls.instances = [];
+    const video = createVideoElement();
+    const controller = createAdaptiveVideoPlaybackController(video, {
+        HlsClass: FakeHls,
+        getNetworkProfile: () => ({ profile: 'normal' }),
+    });
+
+    controller.attach(hlsSource, mp4Source);
+    const hls = FakeHls.instances[0];
+    hls.trigger(FakeHls.Events.MANIFEST_PARSED);
+    controller.stopLoad();
+    controller.startLoad(8.25);
+
+    assert.equal(FakeHls.instances.length, 1);
+    assert.equal(hls.calls.some(([name]) => name === 'destroy'), false);
+    assert.deepEqual(hls.calls.filter(([name]) => name === 'startLoad').map(([, position]) => position), [0, 8.25]);
+    controller.destroy();
+});

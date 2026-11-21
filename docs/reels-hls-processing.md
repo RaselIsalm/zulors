@@ -12,8 +12,9 @@ without upscaling. It preserves source aspect ratio and frame rate. Each master
 variant reports its encoded resolution, frame rate, codecs, measured average
 bandwidth and segment-measured peak bandwidth. The default native-HLS variant
 is the highest available rung up to 720p; HLS.js chooses the highest rung at or
-below its network startup target before loading the first segment. Segments begin
-with an aligned keyframe. The master playlist is published only after its
+below its network startup target before loading the first segment. Two-second
+segments begin with aligned keyframes to reduce the initial download and wait
+for a segment boundary. The master playlist is published only after its
 segments are uploaded. The HLS encoding version changes whenever rendition
 settings change; `--rebuild --limit=200` queues existing outputs for re-encoding
 from their original archive.
@@ -36,7 +37,7 @@ creates and deletes a no-store probe object while checking preflight, playlist
 reads, HEAD requests, byte ranges, and exposed `Content-Range` headers. Live
 deployments run this check before promoting a release.
 
-Feed cards render the thumbnail first and mount players within 500 pixels of
+Feed cards render the thumbnail first and mount players within 1200 pixels of
 the viewport. Feed HLS loads only after the playback arbiter selects a visible
 video. The service worker caches app-origin media and HLS objects from the
 allowlisted `media.zulors.com` origin in its bounded media cache. It warms the
@@ -48,9 +49,10 @@ downloaded in full just to warm the cache.
 Native playback uses metadata preloading. Reels keep the next rendition and
 buffer bounded. Active playback starts near 720p when the network estimate can
 support it, then adapts through the full ladder when measured throughput
-requires it; off-screen
-players pause and release their buffered source, and the feed playback arbiter
-allows one visible video to play at a time. HLS.js waits for the master
+requires it. Off-screen feed players pause and stop HLS downloads while keeping
+their attached source and decoded frame. Reels keep loaded nearby sources and
+release them outside the preload window. The feed playback arbiter allows one
+visible video to play at a time. HLS.js waits for the master
 manifest, selects the best rendition at or below the current network target,
 then starts segment loading and continues adaptive switching. This avoids
 starting at the lowest auto-estimated level when the network profile already

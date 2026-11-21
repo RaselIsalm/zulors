@@ -31,6 +31,7 @@ class ReelsHlsProcessingTest extends TestCase
 
     public function test_hls_rendition_ladder_uses_the_source_short_edge_without_upscaling(): void
     {
+        $this->assertSame(2, GeneratePostVideoHls::SEGMENT_DURATION_SECONDS);
         $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(720, 1280));
         $this->assertSame([240, 360, 480, 720], GeneratePostVideoHls::renditionShortEdgesForSource(1280, 720));
         $this->assertSame([240, 360, 480, 720, 1080], GeneratePostVideoHls::renditionShortEdgesForSource(1080, 1920));

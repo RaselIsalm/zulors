@@ -23,7 +23,8 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public const ENCODING_VERSION = 'v4';
+    public const ENCODING_VERSION = 'v5';
+    public const SEGMENT_DURATION_SECONDS = 2;
 
     public int $tries = 5;
     public int $timeout = 21600;
@@ -331,9 +332,9 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'main',
             '-pix_fmt', 'yuv420p', '-b:v', (string) $profile['video'], '-maxrate', (string) $profile['max'],
             '-bufsize', (string) ($profile['max'] * 2), '-g', '240', '-keyint_min', '1', '-sc_threshold', '0',
-            '-force_key_frames', 'expr:gte(t,n_forced*4)',
+            '-force_key_frames', 'expr:gte(t,n_forced*'.self::SEGMENT_DURATION_SECONDS.')',
             '-c:a', 'aac', '-b:a', '96k', '-ac', '2',
-            '-progress', 'pipe:1', '-nostats', '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod', '-hls_segment_type', 'mpegts',
+            '-progress', 'pipe:1', '-nostats', '-f', 'hls', '-hls_time', (string) self::SEGMENT_DURATION_SECONDS, '-hls_playlist_type', 'vod', '-hls_segment_type', 'mpegts',
             '-hls_flags', 'independent_segments', '-hls_segment_filename', $segmentPattern, $playlistPath,
         ];
 

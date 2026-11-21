@@ -35,6 +35,7 @@
 			>
 				<ReelVideoPlayer
 					v-if="canPlayImmediately"
+			v-bind:key="mediaItem.id"
 					v-bind:mediaItem="mediaItem"
 					v-bind:postData="postData"
 					v-bind:active="active"

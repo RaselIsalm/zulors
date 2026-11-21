@@ -21,7 +21,7 @@ for(const platform of Object.values(platforms)) {
         assert.match(publication.template.content, /v-bind:thumbnailUrl="posterUrl"/);
         assert.match(publication.script.content, /thumbnail_url \|\| mediaItem\.value\.lqip_base64/);
         assert.match(publication.template.content, /v-if="isNearViewport"/);
-        assert.match(publication.script.content, /rootMargin: '500px 0px'/);
+        assert.match(publication.script.content, /rootMargin: '1200px 0px'/);
         assert.match(player.template.content, /preload="metadata"/);
         assert.doesNotMatch(player.template.content, /<video[^>]+(?:src|v-bind:src)=/);
         assert.match(player.script.content, /createAdaptiveVideoPlaybackController/);

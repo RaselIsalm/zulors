@@ -336,8 +336,9 @@
 					hasBeenVisible = true;
 					if(playbackSuspended) {
 						playbackSuspended = false;
-						state.isLoaded = false;
-						playbackAttached = Boolean(playbackController?.resume());
+						if(playbackAttached) {
+							playbackController?.startLoad(Number(videoPlayerRef.value?.currentTime || 0));
+						}
 					}
 					return;
 				}
@@ -346,16 +347,18 @@
 					return;
 				}
 
-				const resumePosition = Number(videoPlayerRef.value?.currentTime || 0);
 				pauseVideo();
-				playbackController.suspend(resumePosition);
-				playbackAttached = false;
+				playbackController.stopLoad();
 				playbackSuspended = true;
-				state.isLoaded = false;
 			});
 
 			watch(() => [playbackSource.value.url, playbackSource.value.transport, directFallbackSource.value?.url], () => {
 				if(! playbackController) {
+					return;
+				}
+
+				// Keep the currently decoded source and frame if metadata is refreshed while this video is already loaded.
+				if(state.isLoaded) {
 					return;
 				}
 
