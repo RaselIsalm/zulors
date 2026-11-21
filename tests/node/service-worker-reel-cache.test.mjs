@@ -63,10 +63,10 @@ function createWorkerHarness() {
         return response;
     }
 
-    async function updateWindow(current = [], next = [], prefetch = true, preferredShortEdge = 720) {
+    async function updateWindow(current = [], next = [], prefetch = true, preferredShortEdge = 720, currentBufferSeconds = 5, nextBufferSeconds = 2) {
         let completion = Promise.resolve();
         listeners.get('message')({
-            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch, preferredShortEdge },
+            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch, preferredShortEdge, currentBufferSeconds, nextBufferSeconds },
             waitUntil(value) { completion = value; },
         });
         await completion;
@@ -232,6 +232,42 @@ test('the current and next HLS windows prefetch their network-appropriate starti
     assert.ok(requestedUrls.includes(next.hdSegment));
     assert.ok(!requestedUrls.includes(next.low));
     assert.ok(await worker.cache.match(new worker.Request(current.hdSegment)));
+});
+
+test('the active reel prefetches enough segments for five seconds while each upcoming reel gets two seconds', async () => {
+    const worker = createWorkerHarness();
+    const currentMaster = 'https://media.zulors.com/current/master.m3u8';
+    const currentVariant = 'https://media.zulors.com/current/720/index.m3u8';
+    const nextMaster = 'https://media.zulors.com/next/master.m3u8';
+    const nextVariant = 'https://media.zulors.com/next/720/index.m3u8';
+    const playlist = (base, segmentCount) => [
+        '#EXTM3U',
+        ...Array.from({ length: segmentCount }, (_, index) => [`#EXTINF:2.0,`, `segment_${index}.ts`]).flat(),
+        '#EXT-X-ENDLIST',
+        '',
+    ].join('\n');
+    const master = (variantUrl) => new Response('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4400000,RESOLUTION=720x1280\n720/index.m3u8\n', {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+    });
+
+    worker.responses.set(currentMaster, () => master(currentVariant));
+    worker.responses.set(nextMaster, () => master(nextVariant));
+    worker.responses.set(currentVariant, () => new Response(playlist(currentVariant, 4), {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+    }));
+    worker.responses.set(nextVariant, () => new Response(playlist(nextVariant, 4), {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+    }));
+
+    await worker.updateWindow([currentMaster], [nextMaster]);
+
+    const requested = new Set(worker.requests.map((request) => request.url));
+    for(let index = 0; index < 3; index++) {
+        assert.ok(requested.has(`https://media.zulors.com/current/720/segment_${index}.ts`));
+    }
+    assert.ok(!requested.has('https://media.zulors.com/current/720/segment_3.ts'));
+    assert.ok(requested.has('https://media.zulors.com/next/720/segment_0.ts'));
+    assert.ok(!requested.has('https://media.zulors.com/next/720/segment_1.ts'));
 });
 
 test('the service worker rejects unrelated cross-origin media cache URLs', async () => {

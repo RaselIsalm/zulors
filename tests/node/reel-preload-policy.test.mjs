@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getPreferredReelLevelIndex, getReelPreloadPolicy } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
+import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getPreferredReelLevelIndex, getReelPreloadPolicy, getRequiredStartupBufferSeconds, getSustainableReelLevelIndex } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
+
+test('startup buffer target is capped to the remaining duration of short videos', () => {
+	assert.equal(getRequiredStartupBufferSeconds(3, 0), 3);
+	assert.equal(getRequiredStartupBufferSeconds(60, 2), 5);
+	assert.equal(getRequiredStartupBufferSeconds(60, 58), 2);
+	assert.equal(getRequiredStartupBufferSeconds(Number.POSITIVE_INFINITY, 0), 5);
+});
 
 test('the next reel preloads one network-appropriate segment then keeps its buffer bounded', () => {
     assert.deepEqual(getReelPreloadPolicy({
@@ -17,6 +24,10 @@ test('the next reel preloads one network-appropriate segment then keeps its buff
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
         preferredShortEdge: 720,
+        startupBufferSeconds: 5,
+        startupHdWaitMs: 10_000,
+        nextBufferSeconds: 2,
+        stallIndicatorDelayMs: 2_000,
         autoLevelCapping: -1,
         maxBufferLength: 3,
         maxMaxBufferLength: 3,
@@ -57,7 +68,7 @@ test('the active reel is not capped to the warmup rendition', () => {
     assert.equal(policy.preferredShortEdge, 720);
 });
 
-test('startup quality follows estimated throughput and can begin below HD', () => {
+test('startup targets HD while the coarse network estimate remains available to ABR', () => {
     const slow = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'slow' } });
     const fast = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'fast' } });
     const measured = getReelPreloadPolicy({ active: true, networkProfile: { profile: 'normal', downlinkMbps: 5 } });
@@ -65,14 +76,28 @@ test('startup quality follows estimated throughput and can begin below HD', () =
 
     assert.equal(slow.startLevel, -1);
 	assert.equal(slow.abrEwmaDefaultEstimate, 1_800_000);
-	assert.equal(slow.preferredShortEdge, 360);
+	assert.equal(slow.preferredShortEdge, 720);
     assert.equal(fast.abrEwmaDefaultEstimate, 8_000_000);
-    assert.equal(fast.preferredShortEdge, 1080);
+	assert.equal(fast.preferredShortEdge, 720);
 	assert.equal(measured.abrEwmaDefaultEstimate, 4_500_000);
     assert.equal(measured.preferredShortEdge, 720);
 	assert.equal(coarseLowDownlink.abrEwmaDefaultEstimate, 1_080_000);
-	assert.equal(coarseLowDownlink.preferredShortEdge, 360);
-	assert.equal(getReelPreloadPolicy({ active: true, networkProfile: { profile: 'very_slow' } }).preferredShortEdge, 240);
+	assert.equal(coarseLowDownlink.preferredShortEdge, 720);
+	assert.equal(getReelPreloadPolicy({ active: true, networkProfile: { profile: 'very_slow' } }).preferredShortEdge, 720);
+});
+
+test('startup fallback selects the highest rendition sustainable by measured throughput', () => {
+	const levels = [
+		{ width: 240, height: 426, bitrate: 500_000 },
+		{ width: 360, height: 640, bitrate: 950_000 },
+		{ width: 480, height: 854, bitrate: 1_700_000 },
+		{ width: 720, height: 1280, bitrate: 3_400_000 },
+	];
+
+	assert.equal(getSustainableReelLevelIndex(levels, 1_500_000), 1);
+	assert.equal(getSustainableReelLevelIndex(levels, 2_500_000), 2);
+	assert.equal(getSustainableReelLevelIndex(levels, 5_000_000), 3);
+	assert.equal(getSustainableReelLevelIndex(levels, 0), 0);
 });
 
 test('the initial HLS rendition selects the highest rung at or below the network target', () => {

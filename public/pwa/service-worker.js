@@ -418,7 +418,7 @@ const cacheMediaResource = async (url, priority) => {
     return prefetchPromise;
 };
 
-const prefetchHlsPlayback = async (url, priority, preferredShortEdge = 0) => {
+const prefetchHlsPlayback = async (url, priority, preferredShortEdge = 0, targetBufferSeconds = 2) => {
     const masterResponse = await cacheMediaResource(url, priority);
 
     if(! masterResponse?.ok) {
@@ -459,32 +459,51 @@ const prefetchHlsPlayback = async (url, priority, preferredShortEdge = 0) => {
             || variants[0];
         const variantUrl = selectedVariant?.url || null;
 
-        if(! variantUrl) {
-            const firstSegment = lines.find((line) => !line.startsWith('#'));
-            const segmentUrl = firstSegment ? normalizeCachePriorityUrl(new URL(firstSegment, url).href) : null;
+        const playlistUrl = variantUrl || url;
+        let playlistResponse = masterResponse;
+        if(variantUrl) {
+            hlsDescendantPriorityUrls.set(variantUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(variantUrl) || 0)));
+            playlistResponse = await cacheMediaResource(variantUrl, priority);
+        }
 
-            if(segmentUrl && !/\.m3u8(?:$|\?)/i.test(segmentUrl)) {
-                hlsDescendantPriorityUrls.set(segmentUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(segmentUrl) || 0)));
-                await cacheMediaResource(segmentUrl, priority);
+        if(! playlistResponse?.ok) {
+            return;
+        }
+
+        const playlistText = await playlistResponse.clone().text();
+        const playlistLines = playlistText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const segments = [];
+        let segmentDuration = null;
+
+        for(const line of playlistLines) {
+            if(line.startsWith('#EXTINF:')) {
+                const duration = Number(line.slice(8).split(',')[0]);
+                segmentDuration = Number.isFinite(duration) && duration > 0 ? duration : null;
+                continue;
             }
 
-            return;
+            if(line.startsWith('#')) {
+                continue;
+            }
+
+            const segmentUrl = normalizeCachePriorityUrl(new URL(line, playlistUrl).href);
+            if(segmentUrl && !/\.m3u8(?:$|\?)/i.test(segmentUrl)) {
+                segments.push({ url: segmentUrl, duration: segmentDuration || 2 });
+            }
+            segmentDuration = null;
         }
 
-        hlsDescendantPriorityUrls.set(variantUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(variantUrl) || 0)));
-        const variantResponse = await cacheMediaResource(variantUrl, priority);
-
-        if(! variantResponse?.ok) {
-            return;
-        }
-
-        const variantText = await variantResponse.clone().text();
-        const firstSegment = variantText.split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#'));
-        const segmentUrl = firstSegment ? normalizeCachePriorityUrl(new URL(firstSegment, variantUrl).href) : null;
-
-        if(segmentUrl && !/\.m3u8(?:$|\?)/i.test(segmentUrl)) {
-            hlsDescendantPriorityUrls.set(segmentUrl, Math.max(priority, Number(hlsDescendantPriorityUrls.get(segmentUrl) || 0)));
-            await cacheMediaResource(segmentUrl, priority);
+        let bufferedSeconds = 0;
+        for(const segment of segments) {
+            hlsDescendantPriorityUrls.set(segment.url, Math.max(priority, Number(hlsDescendantPriorityUrls.get(segment.url) || 0)));
+            const segmentResponse = await cacheMediaResource(segment.url, priority);
+            if(!segmentResponse?.ok) {
+                break;
+            }
+            bufferedSeconds += segment.duration;
+            if(bufferedSeconds >= Math.max(1, Number(targetBufferSeconds || 2))) {
+                break;
+            }
         }
     }
     catch (error) {
@@ -492,14 +511,20 @@ const prefetchHlsPlayback = async (url, priority, preferredShortEdge = 0) => {
     }
 };
 
-const prefetchHlsWindow = async (current = [], next = [], preferredShortEdge = 720) => {
+const prefetchHlsWindow = async (
+    current = [],
+    next = [],
+    preferredShortEdge = 720,
+    currentBufferSeconds = 5,
+    nextBufferSeconds = 2,
+) => {
     const orderedUrls = [
-        ...current.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 3]),
-        ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 2).map((url) => [url, 2]),
+        ...current.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 1).map((url) => [url, 3, currentBufferSeconds]),
+        ...next.filter((url) => /\.m3u8(?:$|\?)/i.test(url)).slice(0, 2).map((url) => [url, 2, nextBufferSeconds]),
     ];
 
-    for(const [url, priority] of orderedUrls) {
-        await prefetchHlsPlayback(url, priority, Number(preferredShortEdge));
+    for(const [url, priority, targetBufferSeconds] of orderedUrls) {
+        await prefetchHlsPlayback(url, priority, Number(preferredShortEdge), Number(targetBufferSeconds));
     }
 };
 
@@ -588,7 +613,13 @@ self.addEventListener('message', (event) => {
         });
         const prefetchPlayback = event.data?.prefetch === false
             ? Promise.resolve()
-            : prefetchHlsWindow(event.data?.current, event.data?.next, event.data?.preferredShortEdge);
+            : prefetchHlsWindow(
+                event.data?.current,
+                event.data?.next,
+                event.data?.preferredShortEdge,
+                event.data?.currentBufferSeconds,
+                event.data?.nextBufferSeconds,
+            );
 
         event.waitUntil?.(Promise.all([updatePriorities, prefetchPlayback]));
     }

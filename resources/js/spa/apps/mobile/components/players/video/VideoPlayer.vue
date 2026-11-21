@@ -13,10 +13,14 @@
 			muted
 			v-bind:poster="thumbnailUrl"
 			loop="loop"
+			v-on:playing="handleVideoPlaying"
+			v-on:waiting="handleVideoWaiting"
+			v-on:stalled="handleVideoWaiting"
+			v-on:progress="handlePlaybackProgress"
 		class="size-full object-contain"
 		>
 		</video>
-		<div v-if="state.playRequested && !state.isPlaying" class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center" aria-live="polite" aria-label="Loading video">
+		<div v-if="state.showBufferIndicator" class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center" aria-live="polite" aria-label="Video buffering">
 			<div class="size-10 rounded-full border-4 border-white/35 border-t-white animate-spin"></div>
 		</div>
 
@@ -92,6 +96,8 @@
 	import { useIntersectionObserver } from '@/kernel/vue/composables/inter-obs/index.js';
 	import { buildAdaptiveVideoSource, getDirectPlaybackFallback } from '@/kernel/services/media/adaptive-video/index.js';
 	import { createAdaptiveVideoPlaybackController } from '@/kernel/services/media/adaptive-video/playback.js';
+	import { getRequiredStartupBufferSeconds, getSustainableReelLevelIndex, REEL_STARTUP_BUFFER_SECONDS, REEL_STARTUP_HD_WAIT_MS, REEL_STALL_INDICATOR_DELAY_MS } from '@/kernel/services/media/reel-preload-policy.js';
+	import { queueMetric } from '@/kernel/services/performance/index.js';
 	import { retainReelPlaybackHandoff } from '@/kernel/services/media/reel-playback-handoff.js';
 	import { colibriEventBus } from '@/kernel/events/bus/index.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
@@ -173,6 +179,9 @@
 			let playbackSuspended = false;
 			let playAttemptId = 0;
 			let playPromisePending = false;
+			let startupBufferTimer = null;
+			let bufferingGraceTimer = null;
+			let startupQualityFallbackApplied = false;
 			const playbackCandidateId = `mobile-feed-video-${props.postId || 'post'}-${props.mediaId || 'media'}-${Math.random().toString(36).slice(2)}`;
 			const unregisterPlaybackCandidate = registerVideoPlaybackCandidate({
 				id: playbackCandidateId,
@@ -190,6 +199,8 @@
 				isLoaded: false,
 				isPlaying: false,
 				playRequested: false,
+				showBufferIndicator: false,
+				hasStartedPlayback: false,
 				progressBar: 0,
 				bufferedBar: 0,
 				playbackTime: 0,
@@ -363,6 +374,11 @@
 					return;
 				}
 
+				clearStartupBufferTimer();
+				startupQualityFallbackApplied = false;
+				state.hasStartedPlayback = false;
+				state.showBufferIndicator = false;
+
 				playbackController.setSource(playbackSource.value, directFallbackSource.value);
 				playbackAttached = false;
 				if(playbackSuspended) {
@@ -421,8 +437,9 @@
 					videoPlayerRef.value.addEventListener('loadedmetadata', handleVideoReady);
 					videoPlayerRef.value.addEventListener('canplay', handleVideoReady);
 					videoPlayerRef.value.addEventListener('durationchange', handleVideoReady);
-					videoPlayerRef.value.addEventListener('progress', syncBufferedProgress);
+					videoPlayerRef.value.addEventListener('progress', handlePlaybackProgress);
 					playbackController = createAdaptiveVideoPlaybackController(videoPlayerRef.value);
+					playbackController.setCallbacks({ onBuffer: handlePlaybackProgress });
 					playbackController.setSource(playbackSource.value, directFallbackSource.value);
 					if(videoPlayerRef.value.readyState >= 1) {
 						handleVideoReady();
@@ -437,7 +454,7 @@
 					videoPlayerRef.value.removeEventListener('loadedmetadata', handleVideoReady);
 					videoPlayerRef.value.removeEventListener('canplay', handleVideoReady);
 					videoPlayerRef.value.removeEventListener('durationchange', handleVideoReady);
-					videoPlayerRef.value.removeEventListener('progress', syncBufferedProgress);
+					videoPlayerRef.value.removeEventListener('progress', handlePlaybackProgress);
 					flushVideoTelemetry('video_watch');
 					if(! playbackController?.isHandedOff()) {
 						pauseVideo();
@@ -445,6 +462,8 @@
 				}
 
 				stopProgressUpdater();
+				clearStartupBufferTimer();
+				clearBufferingGraceTimer();
 				if(playbackController?.isHandedOff()) {
 					playbackController = null;
 				}
@@ -463,12 +482,147 @@
 				}
 			}
 
+			const bufferedAheadSeconds = () => {
+				const videoElement = videoPlayerRef.value;
+				if(! videoElement?.buffered?.length) {
+					return 0;
+				}
+
+				try {
+					const currentTime = Number(videoElement.currentTime || 0);
+					for(let index = 0; index < videoElement.buffered.length; index++) {
+						const start = videoElement.buffered.start(index);
+						const end = videoElement.buffered.end(index);
+						if(currentTime >= start && currentTime <= end) {
+							return Math.max(0, end - currentTime);
+						}
+					}
+					return Math.max(0, videoElement.buffered.end(videoElement.buffered.length - 1) - currentTime);
+				}
+				catch(error) {
+					return 0;
+				}
+			};
+
+			const requiredStartupBufferSeconds = () => {
+				const videoElement = videoPlayerRef.value;
+				return getRequiredStartupBufferSeconds(
+					videoElement?.duration,
+					videoElement?.currentTime,
+					REEL_STARTUP_BUFFER_SECONDS
+				);
+			};
+
+			const clearStartupBufferTimer = () => {
+				if(startupBufferTimer) {
+					clearTimeout(startupBufferTimer);
+					startupBufferTimer = null;
+				}
+			};
+
+			const clearBufferingGraceTimer = () => {
+				if(bufferingGraceTimer) {
+					clearTimeout(bufferingGraceTimer);
+					bufferingGraceTimer = null;
+				}
+			};
+
+			const showBufferingAfterGrace = () => {
+				clearBufferingGraceTimer();
+				if(! state.hasStartedPlayback) {
+					state.showBufferIndicator = false;
+					return;
+				}
+
+				bufferingGraceTimer = setTimeout(() => {
+					bufferingGraceTimer = null;
+					state.showBufferIndicator = Boolean(state.hasStartedPlayback && state.isBuffering && isIntersecting.value);
+				}, REEL_STALL_INDICATOR_DELAY_MS);
+			};
+
+			const chooseSustainableStartupLevel = () => {
+				const hlsInstance = playbackController?.getHlsInstance?.();
+				if(! hlsInstance) {
+					return -1;
+				}
+
+				const bandwidthEstimate = Number(hlsInstance.bandwidthEstimate || hlsInstance.abrEwmaDefaultEstimate || 0);
+				const level = getSustainableReelLevelIndex(hlsInstance.levels || [], bandwidthEstimate);
+				if(level >= 0 && 'nextAutoLevel' in hlsInstance) {
+					hlsInstance.nextAutoLevel = level;
+				}
+				return level;
+			};
+
+			const beginStartupBufferWait = () => {
+				if(startupBufferTimer || startupQualityFallbackApplied || ! state.playRequested) {
+					return;
+				}
+
+				startupBufferTimer = setTimeout(() => {
+					startupBufferTimer = null;
+					if(bufferedAheadSeconds() >= requiredStartupBufferSeconds()) {
+						handlePlaybackProgress();
+						return;
+					}
+
+					startupQualityFallbackApplied = true;
+					if(playbackController?.getHlsInstance?.()) {
+						chooseSustainableStartupLevel();
+					}
+					else if(Number(videoPlayerRef.value?.readyState || 0) >= 2) {
+						playVideo();
+					}
+				}, REEL_STARTUP_HD_WAIT_MS);
+			};
+
+			const handlePlaybackProgress = () => {
+				syncBufferedProgress();
+				const hasStartupBuffer = bufferedAheadSeconds() >= requiredStartupBufferSeconds();
+				const directFallbackReady = startupQualityFallbackApplied
+					&& ! playbackController?.getHlsInstance?.()
+					&& Number(videoPlayerRef.value?.readyState || 0) >= 2;
+
+				if(hasStartupBuffer || directFallbackReady) {
+					clearStartupBufferTimer();
+					if(state.playRequested && isIntersecting.value && ! state.isPlaying) {
+						playVideo();
+					}
+				}
+			};
+
+			const handleVideoPlaying = () => {
+				const recovered = state.isBuffering && state.hasStartedPlayback;
+				state.isPlaying = true;
+				state.hasStartedPlayback = true;
+				state.showBufferIndicator = false;
+				state.isBuffering = false;
+				clearStartupBufferTimer();
+				clearBufferingGraceTimer();
+				if(recovered) {
+					queueMetric('media_recovery', 1, { category: 'feed', rendition: playbackController?.getHlsInstance?.() ? 'hls' : 'mp4' });
+				}
+			};
+
+			const handleVideoWaiting = () => {
+				if(! isIntersecting.value || ! state.hasStartedPlayback || state.isBuffering) {
+					return;
+				}
+
+				state.isBuffering = true;
+				queueMetric('media_stall', 1, { category: 'feed', rendition: playbackController?.getHlsInstance?.() ? 'hls' : 'mp4' });
+				showBufferingAfterGrace();
+			};
+
 			const playVideo = () => {
 				if(! videoPlayerRef.value || state.isScrubbing) {
 					return;
 				}
 
 				state.playRequested = true;
+				if(! state.hasStartedPlayback) {
+					beginStartupBufferWait();
+				}
 
 				if(! playbackAttached) {
 					playbackAttached = Boolean(playbackController?.attach(playbackSource.value, directFallbackSource.value));
@@ -483,6 +637,15 @@
 				}
 
 				if(! state.isLoaded) {
+					playbackController?.startLoad(Number(videoPlayerRef.value.currentTime || 0));
+					return;
+				}
+
+				const directFallbackReady = startupQualityFallbackApplied
+					&& ! playbackController?.getHlsInstance?.()
+					&& Number(videoPlayerRef.value.readyState || 0) >= 2;
+				if(! state.hasStartedPlayback && bufferedAheadSeconds() < requiredStartupBufferSeconds() && ! directFallbackReady) {
+					state.isBuffering = true;
 					playbackController?.startLoad(Number(videoPlayerRef.value.currentTime || 0));
 					return;
 				}
@@ -506,6 +669,11 @@
 
 					setMuted();
 					state.isPlaying = true;
+					state.hasStartedPlayback = true;
+					state.showBufferIndicator = false;
+					state.isBuffering = false;
+					clearStartupBufferTimer();
+					clearBufferingGraceTimer();
 					startWatchSession();
 					startProgressUpdater();
 					startTelemetryTimer();
@@ -531,6 +699,10 @@
 
 			const pauseVideo = () => {
 				state.playRequested = false;
+				state.isBuffering = false;
+				state.showBufferIndicator = false;
+				clearStartupBufferTimer();
+				clearBufferingGraceTimer();
 				playAttemptId += 1;
 				playPromisePending = false;
 				if(videoPlayerRef.value) {

@@ -172,6 +172,14 @@ export function createAdaptiveVideoPlaybackController(videoElement, options = {}
 			});
 		}
 
+		if(HlsClass.Events.FRAG_BUFFERED) {
+			instance.on(HlsClass.Events.FRAG_BUFFERED, () => {
+				if(hlsInstance === instance) {
+					options.onBuffer?.(videoElement, instance);
+				}
+			});
+		}
+
 		instance.on(HlsClass.Events.MEDIA_ATTACHED, () => {
 			if(hlsInstance !== instance) {
 				return;

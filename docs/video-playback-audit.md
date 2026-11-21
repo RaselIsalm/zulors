@@ -1,60 +1,95 @@
 # Feed and Reels playback audit
 
-## Findings from the repository
+## Root causes
 
-- Feed video elements rendered a poster and used `preload="metadata"`. The
-  adaptive source was attached when the playback arbiter requested playback,
-  so the active feed video could still wait for the HLS manifest and its first
-  segment after it became visible. Service worker prefetch covered only one
-  upcoming HLS video.
-- Startup quality used a 5 Mbps estimate on slow connections and enforced an
-  HD minimum automatic bitrate. That could select a rung the connection could
-  not sustain and caused stalls despite HLS being available.
-- Reels entry on mobile waited for the first-page request before it had a post
-  to render. Feed-to-Reels navigation also created a new HLS player, discarding
-  the feed player's attached MediaSource and buffered SourceBuffers. A black
-  loading view was shown while the new post and player initialized.
-- Reels playback warmed only the immediate next item, and page fetching began
-  near the end of the current list. Reels already destroy HLS instances when
-  players leave the warm window; the repository did not show a controller
-  disposal leak.
-- The HLS pipeline and Cloudflare R2 custom media domain were already present.
-  The HLS feature flag defaulted off. MP4 fast-start (`moov` before media data),
-  immutable cache headers, range support, and the R2 playback CORS check were
-  already implemented. Repository code cannot establish whether production
-  requests hit Cloudflare cache or what their real TTFB, RTT, or throughput is.
+The examined production sample did not point to an R2 or HLS outage: all 17
+sampled videos had HLS playlists, and all 264 sampled playlist/segment requests
+returned HTTP 200. Median TTFB was 115 ms, p95 was 579 ms, and 248 responses
+were Cloudflare cache HITs. API smoke checks passed and Horizon was running.
+This is a bounded sample, not a guarantee about every device, request, or time.
 
-These are code-level causes and constraints, not a measurement of a particular
-production request. The feed response now includes `Server-Timing` for server
-processing duration; client playback metrics already record first-frame time,
-stalls, recovery, rendition, and terminal errors. Cloudflare cache status and
-real slow-network playback still require a deployed device/session to verify.
+The main causes found in the client playback path were:
 
-## Changes
+- Feed playback attached HLS only after the video became visible and the
+  playback arbiter requested it. Feed prefetch also used `requestIdleCallback`,
+  which could defer the cache warmup by as much as 2.5 seconds. That left the
+  visible video waiting for a manifest and segment despite healthy CDN
+  responses.
+- Startup ABR could choose a low rendition from a coarse network estimate;
+  the initial frame therefore looked soft before quality ramped up. The sampled
+  production ladder had 720p at roughly 3.2–3.6 Mbps and no 1080p rendition, so
+  the app cannot deliver 1080p for those assets without generating it.
+- Reels could treat `loadeddata` or a very small network-profile buffer as
+  playback-ready. That allowed playback to start with too little buffered media
+  and stall during fast swipes or network variation.
+- Reels route state was seeded from the tapped feed post, and a compatible HLS
+  controller handoff existed, but fallback paths could still construct a new
+  player. The transition did not consistently keep the poster visible while
+  that player became ready.
+- The service worker warmed a limited set of HLS resources but did not fetch
+  enough duration for the configured startup buffer. Controller disposal was
+  already bounded to the active/warm Reels window; this audit did not find
+  evidence of a persistent controller leak.
 
-- The feed playback window now prefetches the active HLS video and up to two
-  upcoming videos on normal connections, or one on slow connections. Reels use
-  the same one/two-item lookahead, bounded neighbor buffers, and earlier page
-  fetching. Offline and Data Saver modes continue to skip network prefetch.
-- Startup selects a rendition from the coarse network estimate and leaves the
-  full ABR ladder available. HLS can step below the startup rung when segment
-  throughput is lower than the estimate.
-- Feed-to-Reels entry puts the tapped post and poster on screen before the
-  route's network refresh completes. When the feed has an active HLS.js session,
-  it transfers that same controller, MediaSource, SourceBuffers, and playback
-  position into the Reels element. If transfer is unavailable, the seeded post,
-  poster, and prefetched HLS objects still provide the quick-start path. A
-  short-lived handoff token ensures abandoned controllers are released.
-- HLS generation is enabled by default for new eligible media. Existing R2
-  videos can be backfilled with bounded `media:reconcile-reel-hls` batches;
-  this repository change does not run jobs against a configured production
-  queue or database.
+The latest read-only production snapshot found 17/17 videos HLS-ready and
+processed, no queued/delayed/reserved video jobs, Horizon and the Supervisor
+service active, two video workers using at most 0.2% CPU each, no running
+FFmpeg processes, and about 76 GB free on the worker scratch filesystem. Three
+of the 17 HLS assets report the current v6 encoding version; all 17 remain
+playable. This snapshot does not include whole-host CPU/RAM/load averages or
+database query latency. An authenticated production browser run under
+throttled network conditions is also not available yet. A public production
+request observed during this change returned `/` as HTTP 302 with 2.28 s TTFB
+and `/auth/login` as HTTP 200 with 0.84 s TTFB; these single unauthenticated
+HTML requests do not measure video API or media delivery latency.
 
-## Performance limits
+## Implemented changes
 
-Warm handoff avoids restarting a loaded HLS session. A cold cache, high RTT,
-poor radio conditions, a missing poster, browser autoplay restrictions, or an
-unavailable HLS rendition can still delay the first decoded frame. The app
-keeps the poster visible instead of exposing an empty black surface while it
-waits. A sub-second target should be measured on representative devices and
-networks; it cannot be guaranteed for every uncached slow connection.
+- Feed and Reels now prefer the highest available rendition up to 720p for the
+  initial HLS selection, keep the full ABR ladder available, and remove the
+  forced minimum bitrate. If startup has not accumulated five seconds of media
+  within ten seconds, the player selects the highest rendition supported by
+  its measured throughput. Sources without HD use their highest available
+  level.
+- Feed and active Reels wait for five seconds of buffered media before the
+  first play request is allowed to start. The existing poster remains visible
+  during this wait; direct MP4 fallback can start on a decoded frame after the
+  ten-second deadline. Feed-to-Reels handoff marks transferred media ready so
+  an already-buffered HLS controller can continue without waiting for a second
+  startup buffer. The startup buffer requirement is capped by remaining media
+  duration so clips shorter than five seconds can start when fully buffered.
+  Reels starts its ten-second quality deadline when the active source attaches
+  or its manifest is ready, rather than waiting for the first data event.
+- Buffering indicators are suppressed during initial startup and shown only
+  when playback has already begun and a stall lasts at least two seconds.
+- Feed prefetch runs on a bounded short timer instead of waiting for idle time.
+  The service worker warms the active HLS rendition through five seconds of
+  segments and the next one or two videos through two seconds, depending on
+  network profile. Offline and Data Saver continue to disable media prefetch.
+- Both mobile and desktop player implementations use the same startup,
+  handoff, buffering, and cleanup rules. Existing API and HLS storage formats
+  are unchanged.
+
+## Local verification
+
+- `npm run test:ws`: 206 tests passed.
+- `npx vite build --outDir /tmp/zulors-vite-build --emptyOutDir`: production
+  Vite build passed.
+- The focused playback/prefetch tests cover HD-first level selection,
+  sustainable fallback, five-second current buffers, two-second next buffers,
+  handoff readiness, and delayed buffering indicators.
+
+## Performance limits and follow-up verification
+
+The target is a visible poster immediately and a first frame under one second
+for warm/prefetched playback on a fast connection. Waiting for five seconds of
+media intentionally trades a longer cold start for fewer early stalls; cold
+uncached media and connections slower than the selected rendition cannot be
+guaranteed to start in under one second. With the sampled 720p bitrate, a
+steady 3.2–3.6 Mbps plus protocol overhead is needed to sustain HD.
+
+Before treating the production result as verified, collect host and database
+metrics and run an authenticated mobile browser session on fast, moderate, and
+throttled networks. Record first-frame time, first rendition, stall duration,
+Cloudflare cache status, and feed-to-Reels handoff success. The current local
+build and unit checks do not replace those live playback measurements.

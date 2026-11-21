@@ -23,9 +23,15 @@ for(const platform of Object.values(platforms)) {
         assert.match(publication.template.content, /v-if="isNearViewport"/);
         assert.match(publication.script.content, /rootMargin: '1200px 0px'/);
         assert.match(player.template.content, /preload="metadata"/);
-        assert.match(player.template.content, /state\.playRequested && !state\.isPlaying/);
+		assert.match(player.template.content, /state\.showBufferIndicator/);
+		assert.doesNotMatch(player.template.content, /state\.playRequested && !state\.isPlaying/);
+		assert.match(player.template.content, /v-on:waiting="handleVideoWaiting"/);
         assert.doesNotMatch(player.template.content, /<video[^>]+(?:src|v-bind:src)=/);
         assert.match(player.script.content, /createAdaptiveVideoPlaybackController/);
+		assert.match(player.script.content, /REEL_STARTUP_BUFFER_SECONDS/);
+		assert.match(player.script.content, /REEL_STARTUP_HD_WAIT_MS/);
+		assert.match(player.script.content, /REEL_STALL_INDICATOR_DELAY_MS/);
+		assert.match(player.script.content, /playbackController\.setCallbacks\(\{ onBuffer: handlePlaybackProgress \}\)/);
         assert.match(player.script.content, /const togglePlayback = \(\) => \{\s*if\(state\.isPlaying \|\| state\.playRequested\)/);
         assert.doesNotMatch(player.script.content, /handleVideoSurfaceClick:[\s\S]{0,450}if\(state\.isLoaded\)/);
         assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\)/);
@@ -54,12 +60,17 @@ for(const platform of Object.values(platforms)) {
 
 test('timeline prefetch keeps image lookahead and bounds the HLS cache window', async () => {
     const source = (await readFile(new URL('../../resources/js/spa/kernel/services/media-prefetch/index.js', import.meta.url))).toString();
+	const worker = (await readFile(new URL('../../public/pwa/service-worker.js', import.meta.url))).toString();
 
     assert.doesNotMatch(source, /createElement\(['"]video['"]\)/);
     assert.match(source, /prefetchImage\(mediaItem\.thumbnail_url\)/);
     assert.match(source, /collectHlsPlaybackUrls\(postsBatch, isSlowNetworkProfile\(networkProfile\) \? 2 : 3\)/);
     assert.match(source, /type: 'ZULORS_REELS_CACHE_WINDOW'/);
+	assert.match(source, /currentBufferSeconds: REEL_STARTUP_BUFFER_SECONDS/);
+	assert.doesNotMatch(source, /requestIdleCallback/);
     assert.match(source, /prefetch: !networkProfile\.offline && !networkProfile\.saveData/);
+	assert.match(worker, /bufferedSeconds >= Math\.max\(1, Number\(targetBufferSeconds \|\| 2\)\)/);
+	assert.match(worker, /currentBufferSeconds = 5/);
 });
 
 for(const platform of Object.values(platforms)) {

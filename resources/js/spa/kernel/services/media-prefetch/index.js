@@ -1,6 +1,10 @@
 import { buildAdaptiveVideoSource } from '@/kernel/services/media/adaptive-video/index.js';
 import { getNetworkProfileSnapshot, isSlowNetworkProfile } from '@/kernel/services/network/index.js';
-import { getReelPlaybackStartupPolicy } from '@/kernel/services/media/reel-preload-policy.js';
+import {
+	getReelPlaybackStartupPolicy,
+	REEL_NEXT_BUFFER_SECONDS,
+	REEL_STARTUP_BUFFER_SECONDS,
+} from '@/kernel/services/media/reel-preload-policy.js';
 
 const prefetchedUrls = new Map();
 let queuedPosts = new Map();
@@ -97,6 +101,8 @@ function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}
         current,
         next,
         preferredShortEdge: getReelPlaybackStartupPolicy(networkProfile).preferredShortEdge,
+        currentBufferSeconds: REEL_STARTUP_BUFFER_SECONDS,
+        nextBufferSeconds: REEL_NEXT_BUFFER_SECONDS,
         prefetch: !networkProfile.offline && !networkProfile.saveData
     };
     const worker = serviceWorker.controller;
@@ -116,16 +122,15 @@ function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
         return;
     }
 
-	const networkProfile = getNetworkProfileSnapshot();
-
-	if(networkProfile.offline) {
+	const initialNetworkProfile = getNetworkProfileSnapshot();
+	if(initialNetworkProfile.offline) {
 		return;
 	}
 
-	const effectiveLimit = isSlowNetworkProfile(networkProfile)
+	const effectiveLimit = isSlowNetworkProfile(initialNetworkProfile)
 		? Math.max(1, Math.ceil(limit / 2))
 		: limit;
-	const queueLimit = isSlowNetworkProfile(networkProfile)
+	const queueLimit = isSlowNetworkProfile(initialNetworkProfile)
 		? Math.max(effectiveLimit * 2, effectiveLimit)
 		: Math.max(effectiveLimit * 3, effectiveLimit);
 
@@ -140,8 +145,9 @@ function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
 
 	const runPrefetch = () => {
 		prefetchHandle = null;
+		const networkProfile = getNetworkProfileSnapshot();
 
-		if(document.visibilityState === 'hidden') {
+		if(document.visibilityState === 'hidden' || networkProfile.offline || networkProfile.saveData) {
 			queuedPosts = new Map();
 			queuedLimit = 0;
 
@@ -172,21 +178,13 @@ function prefetchTimelineMedia(posts = [], limit = 8, options = {}) {
 		publishPlaybackCacheWindow(playbackUrls.slice(0, 1), playbackUrls.slice(1, 3), networkProfile);
 	};
 
-    if(options.immediate) {
-        window.setTimeout(runPrefetch, 0);
-        return;
-    }
-
 	if(prefetchHandle) {
 		return;
 	}
 
-    if('requestIdleCallback' in window) {
-        prefetchHandle = window.requestIdleCallback(runPrefetch, { timeout: 2500 });
-    }
-    else {
-        prefetchHandle = window.setTimeout(runPrefetch, 1200);
-    }
+    // The feed already batches and bounds prefetch work. Waiting for idle can
+    // put the next video behind the user's scroll by multiple seconds.
+	prefetchHandle = window.setTimeout(runPrefetch, options.immediate ? 0 : 100);
 }
 
 function prefetchReelsPlaybackWindow(posts = [], activeIndex = 0) {

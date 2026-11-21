@@ -28,7 +28,7 @@
 				v-on:stalled="handleWaiting"
 				v-on:error="handleNativeError"
 				v-on:timeupdate="syncProgress"
-				v-on:progress="syncBuffered"
+				v-on:progress="handlePlaybackBufferProgress"
 				loop
 			></video>
 		</template>
@@ -36,9 +36,7 @@
 			<img v-bind:src="posterUrl" alt="" class="relative z-10 size-full object-contain bg-transparent">
 		</template>
 		<template v-else>
-			<div class="relative z-10 size-full inline-flex-center bg-black text-white/60">
-				<div class="colibri-primary-animation"></div>
-			</div>
+			<div class="relative z-10 size-full bg-gradient-to-b from-slate-900 via-slate-950 to-black" aria-hidden="true"></div>
 		</template>
 
 		<img
@@ -95,7 +93,14 @@
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { buildAdaptiveVideoSource, getDirectPlaybackFallback, shouldUseHlsJs } from '@/kernel/services/media/adaptive-video/index.js';
 	import { takeReelPlaybackHandoff } from '@/kernel/services/media/reel-playback-handoff.js';
-	import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getReelPreloadPolicy } from '@/kernel/services/media/reel-preload-policy.js';
+	import {
+		applyReelPreloadPolicy,
+		applyReelStartupQualityPolicy,
+		getReelPreloadPolicy,
+		getRequiredStartupBufferSeconds,
+		getSustainableReelLevelIndex,
+		REEL_STALL_INDICATOR_DELAY_MS,
+	} from '@/kernel/services/media/reel-preload-policy.js';
 	import { buildReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 	import { getNetworkProfileSnapshot, isSlowNetworkProfile, subscribeNetworkProfile } from '@/kernel/services/network/index.js';
 	import { createReelPlaybackGestureController } from '@/kernel/services/media/reel-playback-gestures.js';
@@ -160,6 +165,8 @@
 					isReadyForPlayback: false,
 					isPlaying: false,
 					isBuffering: false,
+					hasStartedPlayback: false,
+					startupQualityFallbackApplied: false,
 					showBufferIndicator: false,
 					showRetry: false,
 					hasVisualFrame: false,
@@ -196,6 +203,8 @@
 			let unsubscribeNetworkProfile = null;
 			let sponsoredVideoStarted = false;
 			let handoffReported = false;
+			let startupBufferTimeout = null;
+			let transferredMediaReady = false;
 			let sponsoredThreeSecondView = false;
 			let sponsoredCompletedView = false;
 
@@ -316,6 +325,12 @@
 				}
 			};
 
+			const requiredStartupBufferSeconds = () => getRequiredStartupBufferSeconds(
+				videoDurationSeconds(),
+				videoPlayerRef.value?.currentTime,
+				preloadPolicy.value.startupBufferSeconds
+			);
+
 			const hlsStartPosition = () => {
 				const currentTime = Number(videoPlayerRef.value?.currentTime || 0);
 
@@ -355,10 +370,59 @@
 
 			const showBufferingAfterGrace = () => {
 				clearBufferingGraceTimer();
+				if(! state.hasStartedPlayback) {
+					state.showBufferIndicator = false;
+					return;
+				}
+
 				state.bufferingGraceTimer = setTimeout(() => {
 					state.bufferingGraceTimer = null;
-					state.showBufferIndicator = Boolean(state.isBuffering && props.active && ! state.showRetry);
-				}, 450);
+					state.showBufferIndicator = Boolean(state.hasStartedPlayback && state.isBuffering && props.active && ! state.showRetry);
+				}, REEL_STALL_INDICATOR_DELAY_MS);
+			};
+
+			const clearStartupBufferTimeout = () => {
+				if(startupBufferTimeout) {
+					clearTimeout(startupBufferTimeout);
+					startupBufferTimeout = null;
+				}
+			};
+
+			const chooseSustainableStartupLevel = () => {
+				if(! hlsInstance) {
+					return -1;
+				}
+
+				const bandwidthEstimate = Number(hlsInstance.bandwidthEstimate || preloadPolicy.value.abrEwmaDefaultEstimate || 0);
+				const level = getSustainableReelLevelIndex(hlsInstance.levels || [], bandwidthEstimate);
+				if(level >= 0 && 'nextAutoLevel' in hlsInstance) {
+					hlsInstance.nextAutoLevel = level;
+				}
+
+				return level;
+			};
+
+			const beginStartupBufferWait = () => {
+				if(startupBufferTimeout || state.startupQualityFallbackApplied || transferredMediaReady || ! props.active) {
+					return;
+				}
+
+				startupBufferTimeout = setTimeout(() => {
+					startupBufferTimeout = null;
+					if(bufferedAheadSeconds() >= requiredStartupBufferSeconds()) {
+						handlePlaybackBufferProgress();
+						return;
+					}
+
+					state.startupQualityFallbackApplied = true;
+					if(hlsInstance) {
+						chooseSustainableStartupLevel();
+					}
+					else if(Number(videoPlayerRef.value?.readyState || 0) >= 2) {
+						state.isReadyForPlayback = true;
+						playVideo();
+					}
+				}, preloadPolicy.value.startupHdWaitMs);
 			};
 
 			const recordPlaybackMetric = (metric, value = 1, details = {}) => {
@@ -383,13 +447,11 @@
 				});
 			};
 
-			const updatePlaybackReadiness = (forceReady = false) => {
+			const updatePlaybackReadiness = () => {
 				const readyState = Number(videoPlayerRef.value?.readyState || 0);
-				const hasBufferedAhead = bufferedAheadSeconds() >= state.networkProfile.reelsMinBufferSeconds;
-				const isReady = forceReady
-					|| ! isSlowNetworkProfile(state.networkProfile)
-					|| hasBufferedAhead
-					|| readyState >= 3;
+				const hasBufferedAhead = bufferedAheadSeconds() >= requiredStartupBufferSeconds();
+				const hasDirectFallbackFrame = state.startupQualityFallbackApplied && ! hlsInstance && readyState >= 2;
+				const isReady = transferredMediaReady || hasBufferedAhead || hasDirectFallbackFrame;
 
 				state.isReadyForPlayback = isReady;
 
@@ -410,7 +472,14 @@
 				}
 
 				state.bufferedBar = Math.min(100, Math.max(0, (videoElement.buffered.end(videoElement.buffered.length - 1) / durationSeconds) * 100));
-				updatePlaybackReadiness(false);
+				updatePlaybackReadiness();
+			};
+
+			const handlePlaybackBufferProgress = () => {
+				syncBuffered();
+				if(updatePlaybackReadiness() && props.active && ! props.blocked && ! state.manualPaused && ! state.isPlaying) {
+					nextTick(() => playVideo());
+				}
 			};
 
 				const syncProgress = () => {
@@ -442,7 +511,7 @@
 				}
 
 				state.lastPlaybackTime = currentTime;
-					updatePlaybackReadiness(false);
+					updatePlaybackReadiness();
 				};
 
 				const markVisualFrameReady = () => {
@@ -462,7 +531,7 @@
 						state.resumePosition = 0;
 					}
 					syncProgress();
-					updatePlaybackReadiness(false);
+					updatePlaybackReadiness();
 					markVisualFrameReady();
 				};
 
@@ -479,9 +548,10 @@
 						context.emit('handoff-ready', props.mediaItem.id);
 					}
 
-					updatePlaybackReadiness(true);
+					updatePlaybackReadiness();
 
 					if(props.active && ! props.blocked && ! state.manualPaused && ! state.showRetry && ! state.isPlaying) {
+						beginStartupBufferWait();
 						nextTick(() => {
 							playVideo();
 						});
@@ -612,10 +682,14 @@
 			const resetPlaybackState = (resetSession = false) => {
 				clearBufferRecoveryTimer();
 				clearBufferingGraceTimer();
+				clearStartupBufferTimeout();
+				transferredMediaReady = false;
 				state.isLoaded = false;
 					state.isReadyForPlayback = false;
 					state.isPlaying = false;
 					state.isBuffering = false;
+					state.hasStartedPlayback = false;
+					state.startupQualityFallbackApplied = false;
 					state.showBufferIndicator = false;
 					state.showRetry = false;
 					state.hasVisualFrame = false;
@@ -756,6 +830,7 @@
 						if(props.active && ! state.manualPaused) {
 							state.isBuffering = true;
 							showBufferingAfterGrace();
+							beginStartupBufferWait();
 							syncPlaybackWindow();
 						}
 
@@ -768,6 +843,8 @@
 						state.playRequested = true;
 						if(! state.isPlaying) {
 							state.isPlaying = true;
+						state.hasStartedPlayback = true;
+						clearStartupBufferTimeout();
 							startWatchSession();
 							startTelemetryTimer();
 						}
@@ -788,6 +865,7 @@
 				};
 
 			const pauseVideo = (options = {}) => {
+				clearStartupBufferTimeout();
 				if(videoPlayerRef.value) {
 					videoPlayerRef.value.pause();
 				}
@@ -896,6 +974,7 @@
 					}
 
 					state.isPlaying = true;
+					state.hasStartedPlayback = true;
 					state.isBuffering = false;
 					state.showBufferIndicator = false;
 					state.showRetry = false;
@@ -918,7 +997,7 @@
 						recordPlaybackMetric('media_rendition', renditionShortEdge || videoShortEdge || 1, { rendition: rendition });
 					}
 					state.hasVisualFrame = true;
-					updatePlaybackReadiness(true);
+					updatePlaybackReadiness();
 				startWatchSession();
 				startTelemetryTimer();
 					if(props.sponsoredAdId && ! sponsoredVideoStarted) {
@@ -940,7 +1019,7 @@
 				}
 				state.isBuffering = true;
 				showBufferingAfterGrace();
-				updatePlaybackReadiness(false);
+				updatePlaybackReadiness();
 				recoverPlayback();
 			};
 
@@ -1044,8 +1123,8 @@
 						applyReelPreloadPolicy(instance, preloadPolicy.value);
 
 						const onTransferredFragmentBuffered = () => {
-							syncBuffered();
-							if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 1.8) {
+							handlePlaybackBufferProgress();
+							if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= preloadPolicy.value.nextBufferSeconds) {
 								instance.stopLoad();
 							}
 						};
@@ -1053,6 +1132,7 @@
 						transferredHlsListeners.push({ event: Hls.Events.FRAG_BUFFERED, listener: onTransferredFragmentBuffered });
 
 						if(controller.attachTransferredMedia(transferredHandoff, videoElement)) {
+							transferredMediaReady = true;
 							nextTick(() => {
 								if(videoPlayerRef.value?.readyState >= 1) {
 									handleLoadedMetadata();
@@ -1107,6 +1187,12 @@
 
 						hlsManifestReady = true;
 						applyReelStartupQualityPolicy(instance, preloadPolicy.value.preferredShortEdge);
+						if(state.startupQualityFallbackApplied) {
+							chooseSustainableStartupLevel();
+						}
+						else if(props.active) {
+							beginStartupBufferWait();
+						}
 
 						if(shouldWarmPlayback.value) {
 							instance.startLoad(hlsStartPosition());
@@ -1118,8 +1204,8 @@
 						handleLoadedMetadata();
 					});
 					instance.on(Hls.Events.FRAG_BUFFERED, () => {
-						syncBuffered();
-						if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= 1.8) {
+						handlePlaybackBufferProgress();
+						if(preloadPolicy.value.prewarmingNext && bufferedAheadSeconds() >= preloadPolicy.value.nextBufferSeconds) {
 							hlsInstance?.stopLoad();
 						}
 					});
@@ -1249,12 +1335,18 @@
 					state.forceMp4Fallback = false;
 				state.sessionId = `reel-video-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 				configurePlaybackSource();
+					if(props.active) {
+						beginStartupBufferWait();
+					}
 			});
 
 			watch(() => state.networkProfile.profile, () => {
 				if(shouldAttachPlaybackSource.value) {
 					configurePlaybackSource();
 					syncPlaybackWindow();
+					if(props.active) {
+						beginStartupBufferWait();
+					}
 				}
 				else {
 					releasePlaybackSource();
@@ -1270,6 +1362,9 @@
 				if(shouldAttachPlaybackSource.value) {
 					configurePlaybackSource();
 					syncPlaybackWindow();
+					if(props.active) {
+						beginStartupBufferWait();
+					}
 				}
 			});
 
@@ -1283,6 +1378,7 @@
 				destroyHlsInstance();
 				clearBufferRecoveryTimer();
 				clearBufferingGraceTimer();
+				clearStartupBufferTimeout();
 			});
 
 			return {
@@ -1306,6 +1402,7 @@
 				handleNativeError: handleNativeError,
 				syncProgress: syncProgress,
 				syncBuffered: syncBuffered,
+				handlePlaybackBufferProgress: handlePlaybackBufferProgress,
 				toggleMute: toggleMute
 			};
 		},

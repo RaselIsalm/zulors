@@ -72,7 +72,7 @@ function createVideoElement() {
 const hlsSource = { url: 'https://media.example.test/master.m3u8', type: 'application/vnd.apple.mpegurl', transport: 'hls' };
 const mp4Source = { url: 'https://media.example.test/source.mp4', type: 'video/mp4', transport: 'direct' };
 
-test('adaptive playback starts near the network target on slow hints and retains ABR', () => {
+test('adaptive playback starts with an HD target on slow hints and retains ABR', () => {
     FakeHls.instances = [];
     const video = createVideoElement();
     const controller = createAdaptiveVideoPlaybackController(video, {
@@ -89,7 +89,7 @@ test('adaptive playback starts near the network target on slow hints and retains
     assert.equal(FakeHls.instances[0].options.maxBufferLength, 14);
     assert.equal(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'), false);
     FakeHls.instances[0].trigger(FakeHls.Events.MANIFEST_PARSED);
-    assert.equal(FakeHls.instances[0].startLevel, 1);
+	assert.equal(FakeHls.instances[0].startLevel, 3);
     assert.ok(FakeHls.instances[0].calls.findIndex(([name]) => name === 'startLevel') < FakeHls.instances[0].calls.findIndex(([name]) => name === 'startLoad'));
     assert.ok(FakeHls.instances[0].calls.some(([name]) => name === 'startLoad'));
     controller.destroy();
