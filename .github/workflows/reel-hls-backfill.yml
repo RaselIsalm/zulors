@@ -58,7 +58,7 @@ jobs:
           case "$OPERATION" in rebuild|backfill|status|edge-smoke|auth-smoke|access-audit|worker-audit) ;; *) exit 1 ;; esac
           [[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 && LIMIT <= 200 ))
           if [[ -n "$MEDIA_IDS" ]]; then
-            test "$OPERATION" = "rebuild"
+            [[ "$OPERATION" == "rebuild" || "$OPERATION" == "edge-smoke" ]]
             IFS=, read -ra media_ids <<< "$MEDIA_IDS"
             (( ${#media_ids[@]} >= 1 && ${#media_ids[@]} <= 200 ))
             for media_id in "${media_ids[@]}"; do [[ "$media_id" =~ ^[1-9][0-9]*$ ]]; done
@@ -138,20 +138,24 @@ jobs:
           fi
 
           if [[ "$operation" == "edge-smoke" ]]; then
-            master_url="$(php -r '
+            target_info="$(MEDIA_IDS="$media_ids" php -r '
               require "vendor/autoload.php";
               $app = require "bootstrap/app.php";
               $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-              $media = \App\Models\Media::query()
+              $query = \App\Models\Media::query()
                   ->where("type", \App\Enums\Media\MediaType::VIDEO->value)
                   ->where("status", \App\Enums\Media\MediaStatus::PROCESSED->value)
                   ->where("mediaable_type", \App\Models\Post::class)
                   ->where("metadata->provider", "r2")
-                  ->where("metadata->playback->hls_state", "ready")
-                  ->orderBy("id")
-                  ->first();
-              echo (string) data_get($media?->metadata, "playback.hls");
+                  ->where("metadata->playback->hls_state", "ready");
+              $ids = array_filter(array_map("intval", explode(",", (string) getenv("MEDIA_IDS"))));
+              if ($ids) $query->whereIn("id", $ids);
+              $media = $query->orderBy("id")->first();
+              if ($media) echo (int) $media->id."\t".(string) data_get($media->metadata, "playback.hls");
             ' )"
+            IFS=$'\t' read -r target_media_id master_url <<< "$target_info"
+            test -n "$target_media_id" && test -n "$master_url"
+            printf 'edge_smoke_media_id=%s\n' "$target_media_id"
             test -n "$master_url"
             work_dir="$(mktemp -d)"
             trap 'rm -rf "$work_dir"' EXIT
@@ -169,8 +173,10 @@ jobs:
             }
 
             probe_asset master-first "$master_url" "$work_dir/master.m3u8" "$work_dir/master.headers"
-            variant_path="$(awk 'NF && $0 !~ /^#/ {print; exit}' "$work_dir/master.m3u8")"
+            variant_info="$(awk '/^#EXT-X-STREAM-INF:/ {attributes=$0; next} attributes && NF && $0 !~ /^#/ {print attributes "\t" $0; exit}' "$work_dir/master.m3u8")"
+            IFS=$'\t' read -r variant_attributes variant_path <<< "$variant_info"
             test -n "$variant_path"
+            printf 'master_first_variant=%s\n' "$variant_attributes"
             variant_url="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urljoin(sys.argv[1],sys.argv[2]))' "$master_url" "$variant_path")"
             probe_asset master-repeat "$master_url" /dev/null "$work_dir/master-repeat.headers"
             probe_asset variant-first "$variant_url" "$work_dir/variant.m3u8" "$work_dir/variant.headers"
