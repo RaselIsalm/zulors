@@ -172,6 +172,7 @@
 			let playbackController = null;
 			let hasBeenVisible = false;
 			let playbackSuspended = false;
+			let playbackSourceChangedWhileSuspended = false;
 			const playbackCandidateId = `desktop-feed-video-${props.postId || 'post'}-${props.mediaId || 'media'}-${Math.random().toString(36).slice(2)}`;
 			const unregisterPlaybackCandidate = registerVideoPlaybackCandidate({
 				id: playbackCandidateId,
@@ -339,7 +340,14 @@
 					hasBeenVisible = true;
 					if(playbackSuspended) {
 						playbackSuspended = false;
-						playbackController?.startLoad(Number(videoPlayerRef.value?.currentTime || 0));
+						if(playbackSourceChangedWhileSuspended) {
+							playbackSourceChangedWhileSuspended = false;
+							state.isLoaded = false;
+							playbackController?.resume();
+						}
+						else {
+							playbackController?.startLoad(Number(videoPlayerRef.value?.currentTime || 0));
+						}
 					}
 					return;
 				}
@@ -358,13 +366,9 @@
 					return;
 				}
 
-				// Keep the currently decoded source and frame if metadata is refreshed while this video is already loaded.
-				if(state.isLoaded) {
-					return;
-				}
-
 				playbackController.setSource(playbackSource.value, directFallbackSource.value);
 				if(playbackSuspended) {
+					playbackSourceChangedWhileSuspended = true;
 					return;
 				}
 

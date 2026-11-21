@@ -357,11 +357,6 @@
 					return;
 				}
 
-				// Keep the currently decoded source and frame if metadata is refreshed while this video is already loaded.
-				if(state.isLoaded) {
-					return;
-				}
-
 				playbackController.setSource(playbackSource.value, directFallbackSource.value);
 				playbackAttached = false;
 				if(playbackSuspended) {

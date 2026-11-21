@@ -14,7 +14,8 @@ test('mobile feed keeps its loaded source and frame while a video is off-screen'
     assert.doesNotMatch(visibilityWatch, /playbackAttached\s*=\s*false/);
     assert.doesNotMatch(visibilityWatch, /state\.isLoaded\s*=\s*false/);
     assert.match(visibilityWatch, /playbackController\?\.startLoad\(/);
-    assert.match(player.script.content, /if\(state\.isLoaded\)\s*\{\s*return;\s*\}/);
+    assert.doesNotMatch(player.script.content, /if\(state\.isLoaded\)\s*\{\s*return;\s*\}/);
+    assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\);[\s\S]*?state\.isLoaded = false/);
 });
 
 test('desktop feed also keeps its loaded source and frame while a video is off-screen', async () => {
@@ -23,8 +24,9 @@ test('desktop feed also keeps its loaded source and frame while a video is off-s
 
     assert.match(visibilityWatch, /playbackController\.stopLoad\(\)/);
     assert.doesNotMatch(visibilityWatch, /playbackController\.suspend\(/);
-    assert.doesNotMatch(visibilityWatch, /state\.isLoaded\s*=\s*false/);
     assert.match(visibilityWatch, /playbackController\?\.startLoad\(/);
+    assert.match(visibilityWatch, /playbackSourceChangedWhileSuspended[\s\S]*playbackController\?\.resume\(\)/);
+    assert.match(player.script.content, /playbackController\.setSource\(playbackSource\.value, directFallbackSource\.value\);[\s\S]*?playbackSourceChangedWhileSuspended = true/);
 });
 
 test('mobile reels retain a decoded nearby frame and key players by media identity', async () => {
