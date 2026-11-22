@@ -1,4 +1,5 @@
 import { buildVideoPresentationMetadata } from '../video-metadata.js';
+import { captureVideoPoster } from '../video-poster.js';
 import { durationSecondsToObject } from '../../../helpers/media/audio/index.js';
 
 const videoMimeByExtension = {
@@ -95,7 +96,7 @@ export async function selectPublicationMedia(file, account = null) {
         file.height,
         file.duration_seconds
     ) : {};
-    return {
+    const item = {
         id: client_uid, client_uid, type, mime, size: file.size, account,
         name: file.name || ({ video: 'video.mp4', image: 'image.jpg', audio: 'audio.webm', document: 'document.pdf' }[type] || 'media.bin'),
         ...(native ? { native_file_id: file.native_file_id } : { file: stableFile }),
@@ -105,6 +106,20 @@ export async function selectPublicationMedia(file, account = null) {
         metadata: { ...metadata, ...presentationMetadata, duration: seconds ? durationSecondsToObject(seconds) : null },
         deleted: false,
     };
+    if (type === 'video' && (!native || file.preview_url)) {
+        item.capture_poster = () => {
+            if (!item.poster_promise) {
+                item.poster_promise = captureVideoPoster(native ? file.preview_url : stableFile).then(poster => {
+                    item.thumbnail_data_url = poster;
+                    item.thumbnail_url = poster;
+                    return poster;
+                });
+            }
+            return item.poster_promise;
+        };
+    }
+
+    return item;
 }
 
 export function releasePublicationSelection(item) {

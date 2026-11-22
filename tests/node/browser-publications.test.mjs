@@ -144,6 +144,22 @@ test('video publication can queue when the device cannot provide duration metada
     assert.equal(Object.hasOwn(row.descriptor.items[0], 'duration_seconds'), false);
 });
 
+test('video publication attaches a small local poster to the R2 publication descriptor', async () => {
+    const manager = makeManager(() => { throw new Error('Upload should wait for the worker, not run during enqueue'); });
+    const video = {
+        client_uid: crypto.randomUUID(), type: 'video', name: 'camera.mp4', mime: 'video/mp4', size: 4,
+        file: new Blob(['test'], { type: 'video/mp4' }),
+        capture_poster: async () => {
+            video.thumbnail_data_url = 'data:image/jpeg;base64,/9j/';
+            return video.thumbnail_data_url;
+        },
+    };
+
+    const row = await manager.enqueue({ kind: 'post', content: 'caption' }, [video]);
+
+    assert.equal(row.descriptor.items[0].thumbnail_data_url, video.thumbnail_data_url);
+});
+
 test('video selection is queued without waiting for client-side metadata probing', async () => {
     const previousDocument = globalThis.document;
     let metadataProbeCalls = 0;

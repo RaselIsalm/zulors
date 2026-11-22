@@ -140,6 +140,20 @@ class PublicationFinalizer
                     }
                 }
 
+                $cleanPayload = $publication->payload ?? [];
+                foreach (($cleanPayload['items'] ?? []) as $index => $payloadItem) {
+                    unset($cleanPayload['items'][$index]['thumbnail_data_url']);
+                }
+                $publication->payload = $cleanPayload;
+                foreach ($items as $item) {
+                    $itemMetadata = $item->metadata ?? [];
+                    if (array_key_exists('thumbnail_data_url', $itemMetadata)) {
+                        unset($itemMetadata['thumbnail_data_url']);
+                        $item->metadata = $itemMetadata;
+                        $item->save();
+                    }
+                }
+
                 if ($entity instanceof Comment && ($previousMediaIds = $entity->getAttribute('_previous_media_ids'))) {
                     Media::whereIn('id', $previousMediaIds)->get()->each(function (Media $media) {
                         $media->delete();
@@ -282,7 +296,9 @@ class PublicationFinalizer
 
     private function mediaMetadata(MediaPublication $publication, MediaPublicationItem $item, array $output, array $base = []): array
     {
-        $metadata = array_merge($base, $item->metadata ?? [], $output['metadata'] ?? [], [
+        $itemMetadata = $item->metadata ?? [];
+        unset($itemMetadata['thumbnail_data_url']);
+        $metadata = array_merge($base, $itemMetadata, $output['metadata'] ?? [], [
             'publication_id' => $publication->id,
             'publication_item_id' => $item->id,
         ]);

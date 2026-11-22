@@ -19,6 +19,7 @@ use App\Events\User\Timeline\MediaProcessedEvent;
 use App\Events\User\Timeline\MediaUpdatedEvent;
 use App\Events\User\Timeline\PublicTimelinePostCreatedEvent;
 use App\Jobs\User\Story\ExtractOriginalAudioFromMedia;
+use App\Jobs\Media\IngestR2VideoToCloudflareStream;
 use App\Services\Filesystem\Delete\FileDeleteService;
 use App\Services\Filesystem\Upload\ImageUploadService;
 use App\Services\Filesystem\Upload\VideoUploadService;
@@ -197,6 +198,8 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                 ]);
                 $postMedia->save();
 
+                IngestR2VideoToCloudflareStream::dispatch((int) $postMedia->id)->afterCommit();
+
                 $this->postData->status = PostStatus::ACTIVE;
 
                 $this->postData->save();
@@ -262,7 +265,15 @@ class ConvertAndCompressPostVideo implements ShouldQueue
     public function failed(\Throwable $exception): void
     {
         $postMedia = $this->postData->media()->first();
-        if (! $postMedia || ! $postMedia->status->isProcessed()
+        if (! $postMedia) {
+            return;
+        }
+
+        if ($postMedia->type->isVideo() && $postMedia->status->isProcessed()) {
+            IngestR2VideoToCloudflareStream::dispatch((int) $postMedia->id);
+        }
+
+        if (! $postMedia->status->isProcessed()
             || data_get($postMedia->metadata, 'provider') !== 'r2'
             || ! app(\App\Services\Media\ReelsHlsRollout::class)->processingEnabled()) {
             return;

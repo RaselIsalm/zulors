@@ -8,7 +8,7 @@ direct-upload hardening work. Production was not contacted.
 | Category | Entry point | Current bytes path | Notes |
 | --- | --- | --- | --- |
 | Post/reel images | `routes/api/user/post_editor.php` → `PostImageController::uploadImage` | Browser multipart → Laravel/PHP upload temp → `ImageUploadService`/GD → configured storage disk | Image conversion and disk write run on the app server. Reel publishing shares post/video media. |
-| Post/reel video | `media/video/direct/create` → `DirectMediaUploadController` | Supported clients PUT/multipart to signed R2 or Cloudflare Stream; completion verifies R2; queued post-video job downloads the R2 original to VPS scratch and runs FFmpeg, then uploads the result | `MEDIA_VIDEO_MAX_DURATION_SECONDS` defaults to 600. The raw and multipart proxy endpoints still exist. Proxy budgets depend on `direct_only`; deployment notes say that flag is off in production. |
+| Post/reel video | `media/video/direct/create` → `DirectMediaUploadController` or `/api/media-publications` | Client uploads to signed R2 URLs; completion verifies/promotes R2; post/story workers optimize and create a poster. For explicitly allowlisted users only, a separate job asks Cloudflare Stream to copy the final R2 object and swaps playback to HLS after a signed ready webhook. R2 stays canonical and remains the failure fallback. | Stream is disabled by default and requires account/token/webhook settings plus a pilot allowlist. See [background-publications.md](background-publications.md). |
 | Legacy post video | `media/video/upload` → `PostVideoController` | Multipart through Laravel and the app upload service when direct-only is disabled | Direct-only mode returns 409, but the endpoint remains a server upload path when that flag is false. |
 | Story image/video | `media/upload` → `StoryMediaController::uploadMedia` | Image multipart goes through Laravel, GD and storage. Video is rejected when direct-only is enabled; the dedicated direct-video endpoints PUT/multipart to R2 | Story video processing later uses the VPS story-video job/FFmpeg. |
 | Chat image/audio/document | `chats/{id}/send` and `/audio/{id}/upload` | Multipart through Laravel, then `WithMediaUpload`/audio processing jobs and configured storage | Voice notes also use a two-step API, but the second step sends the full audio body through Laravel. |
@@ -123,11 +123,12 @@ columns. Old media URLs were not rewritten.
 New video upload requests stay on R2 even if legacy Cloudflare Stream settings
 are present. Existing media rows on other disks keep their current URL
 resolution; this code does not migrate old media or change its billing/storage.
-Cloudflare Stream is not configured as a new upload/transcoding destination.
-R2 does not encode video, and no separately billed cloud transcoder is
-configured, so this implementation cannot claim a 90% video-size or total-cost
-reduction. Any such optimization requires selecting and benchmarking a worker
-that reads/writes R2 while keeping video bytes off the VPS and end-user device.
+Cloudflare Stream is not a client upload destination. Managed playback imports from
+R2 only when the opt-in pilot is enabled for the owner's user ID.
+R2 does not encode video. The Stream copy/managed playback path is implemented as
+an opt-in pilot but remains disabled until account credentials, webhook signing,
+allowlisted users and staging measurements are supplied. This implementation
+does not claim any fixed video-size or total-cost reduction.
 
 No production deployment, production credentials, real user files, real R2
 transfer, browser-device run, Android run or network-disconnection run was

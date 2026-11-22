@@ -31,6 +31,7 @@ use App\Models\StoryMusicTrack;
 use App\Notifications\User\Story\StoryLikedNotification;
 use App\Rules\X\XRule;
 use App\Services\Reaction\ReactionService;
+use App\Services\Media\Cloudflare\CloudflareStreamService;
 use App\Traits\Http\Api\SupportsApiResponses;
 use App\Traits\Http\Controllers\Api\User\Story\InteractsWithDraftStoryFrame;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -485,6 +486,19 @@ class StoryController extends Controller
 
         $frameData->increment('views_count');
         $frameData->views_count += 1;
+
+        try {
+            $media = $frameData->media()->first();
+            if ($media && data_get($media->metadata, 'stream.state') === 'ready') {
+                // Story views are unique per viewer, so use the full frame
+                // duration as a conservative delivery estimate.
+                app(CloudflareStreamService::class)->recordDeliveredSeconds(
+                    (float) ($frameData->duration_seconds ?: data_get($media->metadata, 'duration_seconds', 0))
+                );
+            }
+        } catch (Throwable $error) {
+            report($error);
+        }
 
         return true;
     }

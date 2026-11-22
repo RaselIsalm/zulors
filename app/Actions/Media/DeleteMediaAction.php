@@ -4,6 +4,7 @@ namespace App\Actions\Media;
 
 use Throwable;
 use App\Models\Media;
+use App\Jobs\Media\DeleteCloudflareStreamVideo;
 use App\Constants\Filesystem;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,8 @@ class DeleteMediaAction
 	public function execute()
 	{
 		try {
+			$streamUid = data_get($this->mediaData->metadata, 'stream.uid');
+
 			if($this->mediaData->disk !== Filesystem::EXTERNAL_DISK_NAME) {
 	
 				if(! empty($this->mediaData->thumbnail_path) && ! $this->isAssetReferenced($this->mediaData->thumbnail_disk, $this->mediaData->thumbnail_path)) {
@@ -47,6 +50,9 @@ class DeleteMediaAction
 			}
 	
 			$this->mediaData->delete();
+			if (filled($streamUid)) {
+				DeleteCloudflareStreamVideo::dispatch((string) $streamUid)->afterCommit();
+			}
 		} catch (Throwable $th) {
 			logger()->error('Error while deleting media: ' . $th->getMessage(), [
 				'type' => $this->mediaData->mediaable_type,

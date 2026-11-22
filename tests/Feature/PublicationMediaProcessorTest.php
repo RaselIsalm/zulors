@@ -83,6 +83,31 @@ class PublicationMediaProcessorTest extends TestCase
         $this->assertNull($output['metadata']['optimized_size']);
     }
 
+    public function test_small_client_poster_is_persisted_beside_the_r2_video(): void
+    {
+        $image = imagecreatetruecolor(32, 32);
+        ob_start();
+        imagejpeg($image, null, 68);
+        $jpeg = ob_get_clean();
+        imagedestroy($image);
+        $item = $this->item('post', 'video', 'video/mp4', 'poster-video.mp4', 'video-bytes', [
+            'duration_seconds' => 8,
+            'thumbnail_data_url' => 'data:image/jpeg;base64,'.base64_encode($jpeg),
+        ]);
+        $outputPath = $this->targetPath($item, 'mp4');
+        $r2 = $this->mock(R2DirectUploadService::class);
+        $r2->shouldReceive('publishUploadedObject')->once()
+            ->andReturn(['disk' => 'r2_final', 'path' => $outputPath, 'size' => $item->size]);
+
+        $output = app(PublicationMediaProcessor::class)->process($item);
+
+        $this->assertSame('r2_final', $output['thumbnail_disk']);
+        $this->assertSame($this->targetPrefix($item).'/poster.jpg', $output['thumbnail_path']);
+        $this->assertSame(strlen($jpeg), $output['thumbnail_size']);
+        Storage::disk('r2_final')->assertExists($output['thumbnail_path']);
+        $this->assertSame('image/jpeg', getimagesizefromstring(Storage::disk('r2_final')->get($output['thumbnail_path']))['mime']);
+    }
+
     public function test_documents_remain_byte_for_byte_unchanged(): void
     {
         $bytes = "%PDF-1.7\nsource document";

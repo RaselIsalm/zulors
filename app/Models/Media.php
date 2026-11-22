@@ -63,6 +63,13 @@ class Media extends Model
             return $this->source_path;
         }
 
+        if ($this->type->isVideo()
+            && data_get($this->metadata, 'stream.state') === 'ready'
+            && filled(data_get($this->metadata, 'playback.stream_hls'))
+            && app(\App\Services\Media\Cloudflare\CloudflareStreamService::class)->managedPlaybackAllowed()) {
+            return data_get($this->metadata, 'playback.stream_hls');
+        }
+
         if($this->disk == 'cloudflare_stream') {
             if($this->type->isVideo() && ! $this->status->isProcessed()) {
                 return null;
@@ -89,6 +96,13 @@ class Media extends Model
 
     public function getThumbnailUrlAttribute()
     {
+        if ($this->type->isVideo()
+            && data_get($this->metadata, 'stream.state') === 'ready'
+            && filled(data_get($this->metadata, 'playback.stream_thumbnail'))
+            && app(\App\Services\Media\Cloudflare\CloudflareStreamService::class)->managedPlaybackAllowed()) {
+            return data_get($this->metadata, 'playback.stream_thumbnail');
+        }
+
         if($this->disk == 'cloudflare_stream' || $this->thumbnail_disk == 'cloudflare_stream') {
             return data_get($this->metadata, 'playback.thumbnail') ?: $this->buildCloudflareStreamUrl('thumbnails/thumbnail.jpg');
         }

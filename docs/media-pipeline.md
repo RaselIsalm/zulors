@@ -11,14 +11,17 @@ Videos are sent in their original bytes so phones do not spend time, battery or
 RAM re-encoding them. Documents remain unchanged.
 
 Post video publication remains immediate after R2 verifies the uploaded object.
-The media worker then downloads that R2 source to temporary local storage,
-preserves an exact original copy in R2, creates an H.264/AAC MP4 and thumbnail
-with FFmpeg, and removes its local scratch files. When Reels HLS is enabled, a
-second job creates adaptive renditions from the optimized playback MP4 and
-writes the manifest and segments to R2. A failed optimization leaves the source
-playable and can still queue HLS from that source.
+The browser also captures a small JPEG frame from the local selection and stores
+it beside the R2 video, giving the viewer a poster before playback is ready. The
+media worker downloads that R2 source to temporary local storage, preserves an
+exact original copy in R2, creates an H.264/AAC MP4 and thumbnail with FFmpeg,
+and removes its local scratch files. When Reels HLS is enabled, a second job
+creates adaptive renditions from the optimized playback MP4 and writes the
+manifest and segments to R2. An opt-in allowlisted Cloudflare Stream pilot can
+copy the finished R2 object for managed HLS; the Stream URL is selected only
+after its signed ready webhook. R2 MP4/HLS stays available as fallback.
 
-The upload button starts the R2 transfer without a video-preparation step. The
+The upload button starts the R2 transfer without a video-encoding preparation step. Poster extraction is a bounded local preview-only step. The
 browser persists part ETags for retry/resume, and repeat create/complete requests
 reuse the same publication or media identity. Completed R2 objects are verified
 and promoted with an R2-side copy; failed or abandoned temporary objects are
@@ -100,5 +103,20 @@ uploads do not create duplicate posts, and R2/VPS metrics contain no secrets or
 signed URLs.
 
 The local implementation and automated tests are not a substitute for those
-staging checks. Do not enable the production flag or deploy this change until
-staging evidence and rollback steps have been reviewed.
+staging checks. Do not enable the production flags until staging evidence and
+rollback steps have been reviewed.
+
+## Cloudflare Stream pilot
+
+The Stream copy-from-URL pilot is disabled by default. Configure the account ID,
+API token, webhook secret, optional customer subdomain and a short explicit user
+allowlist before staging. It imports only completed R2 playback objects, reuses a
+stable creator identifier across retries, and keeps playback on R2 until Stream
+reports `readyToStream`. Storage-minute caps are enforced using Cloudflare's
+account storage-usage endpoint plus app-side monthly reservations. The delivery
+estimate uses feed watch-time telemetry plus a conservative full-frame estimate
+for each unique Story view. At 95% of that estimate, new imports stop and newly
+serialized media falls back to R2 within the cache window. This is not an exact
+billing limit; compare it with Cloudflare billing/analytics before raising the
+cap. Verify that deletion cleans up the Stream derivative and that fallback
+playback works when Stream or webhook delivery is unavailable.

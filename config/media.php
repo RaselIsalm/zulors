@@ -72,10 +72,16 @@ return [
         ],
 
         'stream' => [
-            // Existing Stream media can keep its historical playback URLs.
-            // This project does not create new Stream uploads.
+            // Managed playback is an opt-in pilot. R2 remains the canonical source.
+            'enabled' => (bool) env('CLOUDFLARE_STREAM_ENABLED', false),
+            'pilot_user_ids' => array_values(array_filter(explode(',', (string) env('CLOUDFLARE_STREAM_PILOT_USER_IDS', '')))),
+            'stored_minutes_cap' => (int) env('CLOUDFLARE_STREAM_STORED_MINUTES_CAP', 1000),
+            'delivered_minutes_guardrail' => (int) env('CLOUDFLARE_STREAM_DELIVERED_MINUTES_GUARDRAIL', 20000),
+            'account_id' => env('CLOUDFLARE_STREAM_ACCOUNT_ID'),
+            'api_token' => env('CLOUDFLARE_STREAM_API_TOKEN'),
             'webhook_secret' => env('CLOUDFLARE_STREAM_WEBHOOK_SECRET'),
             'customer_subdomain' => env('CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN'),
+            'allowed_origins' => array_values(array_filter(explode(',', (string) env('CLOUDFLARE_STREAM_ALLOWED_ORIGINS', '')))),
         ],
     ],
 

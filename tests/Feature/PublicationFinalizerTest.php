@@ -763,12 +763,19 @@ class PublicationFinalizerTest extends TestCase
         $storyPublication = $this->finalize($this->publication($actor, 'story', ['video']));
         $post = Post::with('media')->findOrFail($postPublication->result['id']);
         $frame = StoryFrame::with('media')->findOrFail($storyPublication->result['id']);
+        $storyMedia = $frame->media->first();
+        $storyMedia->metadata = array_merge($storyMedia->metadata ?? [], [
+            'provider' => 'r2', 'processing_mode' => 'original_direct', 'upload_state' => 'uploaded',
+            'final_disk' => 'r2_final',
+        ]);
+        $storyMedia->save();
+        $frame->load('media');
         PublicationFinalizer::asActor($actor, function () use ($post, $frame) {
             app(HandlePostCreation::class)->handle(new PostCreatedEvent($post));
             app(HandleStoryCreation::class)->handle(new StoryCreatedEvent($frame));
         });
         Bus::assertDispatchedTimes(ConvertAndCompressPostVideo::class, 1);
-        Bus::assertNotDispatched(ProcessStoryVideo::class);
+        Bus::assertDispatchedTimes(ProcessStoryVideo::class, 1);
         foreach ([$post, $frame] as $entity) {
             $entity->media->first()->update(['status' => MediaStatus::UNPROCESSED, 'metadata' => []]);
             $entity->load('media');
@@ -778,7 +785,7 @@ class PublicationFinalizerTest extends TestCase
             app(HandleStoryCreation::class)->handle(new StoryCreatedEvent($frame));
         });
         Bus::assertDispatchedTimes(ConvertAndCompressPostVideo::class, 2);
-        Bus::assertDispatchedTimes(ProcessStoryVideo::class, 1);
+        Bus::assertDispatchedTimes(ProcessStoryVideo::class, 2);
     }
 
     public function test_creation_failure_rolls_back_entity_quote_and_counters_and_restores_actor(): void

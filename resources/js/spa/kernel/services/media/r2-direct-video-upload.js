@@ -1,4 +1,5 @@
 import { uploadMultipartPartsAdaptive } from './multipart-upload-progress.js';
+import { captureVideoPoster } from './video-poster.js';
 import { queueMetric } from '../performance/index.js';
 
 const videoMimeByExtension = {
@@ -87,8 +88,12 @@ export async function uploadR2DirectVideo(upload, file, onProgress = () => {}) {
 }
 
 // Progress is advisory. Completion is sent only after all R2 requests settle.
-export async function directVideoUpload({ file, options, request, onProgress, onCreated, onStage }) {
+export async function directVideoUpload({ file, options, request, onProgress, onCreated, onStage, includePoster = false }) {
     const uploadFile = file;
+    // Start frame extraction while the upload is being created and transferred;
+    // it never delays the initial R2 request.
+    const posterSeekSeconds = Math.max(0.12, Number(options?.clip_start_seconds || 0) + 0.12);
+    const posterPromise = includePoster ? captureVideoPoster(uploadFile, { seekSeconds: posterSeekSeconds }) : Promise.resolve('');
     const uploadRequestedAt = performance.now();
     let identity = null;
     let pendingProgress = Promise.resolve();
@@ -115,7 +120,10 @@ export async function directVideoUpload({ file, options, request, onProgress, on
             }
         });
         await pendingProgress;
-        const result = await request('complete', { ...identity, upload_id: upload.upload_id, parts });
+        const completion = { ...identity, upload_id: upload.upload_id, parts };
+        const thumbnailDataUrl = await posterPromise;
+        if (thumbnailDataUrl) completion.thumbnail_data_url = thumbnailDataUrl;
+        const result = await request('complete', completion);
         onStage?.({ stage: 'complete', progress: 100, label: 'upload_complete' });
         return result.data.data;
     }

@@ -7,6 +7,7 @@ use App\Models\Post;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Services\Timeline\FeedTelemetryService;
+use App\Services\Media\Cloudflare\CloudflareStreamService;
 use App\Services\Timeline\VideoIntelligenceService;
 use App\Traits\Http\Api\SupportsApiResponses;
 
@@ -71,6 +72,17 @@ class TelemetryController extends Controller
             }
 
             $videoIntelligenceService->record(me(), $post, $media, $event);
+            if (data_get($media->metadata, 'stream.state') === 'ready'
+                && filled(data_get($media->metadata, 'stream.uid'))
+                && (string) data_get($event, 'event_type') === VideoIntelligenceService::EVENT_WATCH) {
+                try {
+                    app(CloudflareStreamService::class)->recordDeliveredSeconds(
+                        (float) data_get($event, 'watch_time_seconds', 0)
+                    );
+                } catch (\Throwable $error) {
+                    report($error);
+                }
+            }
             $acceptedCount++;
         }
 

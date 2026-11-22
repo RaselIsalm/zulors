@@ -1,22 +1,25 @@
 # Background Publications
 
-> Current source note (2026-10-30): historical rollout notes below describe the
-> earlier VPS FFmpeg implementation. The current source sends new videos
-> unchanged to R2 and publishes after R2 verification; it does not run a VPS or
-> device video encoder. See [upload-flow-audit.md](upload-flow-audit.md) for the
-> current flow. A cloud transcoder has not been selected or configured.
+> Current source note (2026-11-21): uploads still go directly to R2, which remains
+> the canonical source. Eligible post/story videos can then be optimized by the
+> existing media workers. An explicitly configured, allowlisted Cloudflare Stream
+> pilot imports the finished R2 playback object for managed HLS; the pilot is off
+> by default. See [upload-flow-audit.md](upload-flow-audit.md) for the flow.
 
 ## Scope
 
 Background publications let a user select media, press Publish or Send, leave the
 editor, and watch progress from Home or Chat. The server creates the post, story or
-message after R2 verifies each uploaded object and stores its R2 key. A separate
-video transcode step is not part of the current path.
+message after R2 verifies each uploaded object and stores its R2 key. Post/story
+video optimization and optional Stream managed playback are background steps.
 
 The browser publication outbox uses the existing R2 temp/final buckets and shared
-Redis/cache for idempotency. New uploads do not dispatch video FFmpeg jobs. It does
-not add iOS native background upload, new paid infrastructure, Cloudflare Stream,
-audio/document upload changes, or a separate GIF workflow.
+Redis/cache for idempotency. A bounded local JPEG poster is captured from a selected
+video and stored next to its R2 object, so feed/story surfaces have a real frame while
+playback processing runs. The pilot never uploads user bytes directly to Stream; it
+asks Stream to fetch the final R2 object through the public cached media domain after
+the R2 object is verified and existing post/story processing has completed. R2 remains the fallback whenever Stream is not
+ready or unavailable. Audio/document upload behavior is unchanged.
 
 As of the 2026-09-09 live deployment and follow-up activation, the code, migration,
 routes and scheduler entry are deployed to https://zulors.com, and
@@ -107,10 +110,40 @@ reduces size. Otherwise, the original image is retained. GIF and animated PNG/We
 are intentionally rejected from this path.
 
 Videos and documents are unchanged. Video is stored and served from R2 as provided;
-there is no H.264/AAC transcode or thumbnail generation in the current pipeline.
-Playback depends on the original codec. R2 does not compress media. A background
-cloud encoder that reads and writes R2 would incur compute charges and needs a
-separate deployment and measurement before it can be added.
+R2 itself does not encode or compress media. Post/story jobs create the app's
+optimized playback MP4 and thumbnail. For eligible pilot accounts, a separate
+Cloudflare Stream import runs from the processed R2 object and switches playback
+to Stream HLS only after the signed webhook confirms `readyToStream`. The original
+R2 playback remains available throughout processing and on any failure. The initial
+R2 video is not guaranteed to support immediate playback on every browser/device
+codec; the poster stays visible until a video frame is decoded.
+
+The managed Stream pilot is disabled unless all of these are configured:
+
+```dotenv
+CLOUDFLARE_STREAM_ENABLED=true
+CLOUDFLARE_STREAM_PILOT_USER_IDS=123,456
+CLOUDFLARE_STREAM_ACCOUNT_ID=...
+CLOUDFLARE_STREAM_API_TOKEN=...
+CLOUDFLARE_STREAM_WEBHOOK_SECRET=...
+CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN=customer-....cloudflarestream.com
+CLOUDFLARE_STREAM_STORED_MINUTES_CAP=1000
+CLOUDFLARE_STREAM_DELIVERED_MINUTES_GUARDRAIL=20000
+```
+
+The token needs Stream read/write access. Register the app webhook at
+`POST /api/webhooks/cloudflare/stream` and use Cloudflare's `Webhook-Signature`
+secret. The app validates the signed raw body and rejects stale signatures. Stream
+ingestion uses a unique creator ID so retries can find and reuse the same remote
+asset. A monthly storage-minute reservation prevents concurrent pilot jobs from
+crossing the configured cap. Delivered minutes use authenticated feed watch-time
+telemetry plus a conservative full-frame estimate for each unique Story view.
+This is not Cloudflare's invoice counter: replayed Stories and already-loaded
+players can differ. At 95% of the estimate, new imports stop and newly serialized
+media falls back to R2 within the cache window. Compare the estimate with
+Cloudflare billing/analytics before increasing the cap.
+Deleting an app media item queues deletion of its Stream derivative; R2 remains the
+source of truth.
 
 Compression is server-side. Original and optimized byte counts are recorded, but no
 specific final MB size is guaranteed for every file.

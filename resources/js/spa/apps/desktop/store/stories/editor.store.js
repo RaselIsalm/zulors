@@ -104,6 +104,7 @@ const useStoriesEditorStore = defineStore('stories_editor_store', {
 					const media = await directVideoUpload({
 						file: mediaFile,
 						options: uploadOptions,
+						includePoster: true,
 						request: (action, payload) => colibriAPI().storyEditor().with(payload).sendTo('media/video/direct/' + action),
 						onProgress: progress => { this.uploadProgress = progress; },
 						onCreated: upload => {

@@ -33,6 +33,7 @@ use App\Services\Filesystem\Upload\VideoUploadService;
 use App\Services\Filesystem\RoundRobin\RoundRobinService;
 use App\Services\Filesystem\Upload\VideoThumbnailService;
 use App\Services\Media\Cloudflare\R2DirectUploadService;
+use App\Services\Media\VideoPosterStorageService;
 use App\Services\Filesystem\Base64Image\Base64ImageService;
 use App\Support\StoryMusic\OriginalAudioEligibility;
 use App\Traits\Http\Controllers\Api\User\Story\ValidatesStoryMedia;
@@ -265,6 +266,7 @@ class StoryMediaController extends Controller
             'parts' => ['nullable', 'array'],
             'parts.*.part_number' => ['required_with:parts', 'integer', 'min:1', 'max:10000'],
             'parts.*.etag' => ['nullable', 'string', 'max:255'],
+            'thumbnail_data_url' => ['nullable', 'string', 'max:100000', 'regex:~\\Adata:image/jpeg;base64,[A-Za-z0-9+/=]+\\z~'],
         ]);
 
         $storyMedia = $this->findOwnedDraftStoryVideoMedia($request->integer('media_id'), (string) $request->input('uid'));
@@ -332,6 +334,18 @@ class StoryMediaController extends Controller
             'temp_disk' => data_get($metadata, 'temp_disk', $temporaryDisk),
             'final_disk' => $published['disk'],
         ]);
+
+        $poster = app(VideoPosterStorageService::class)->store(
+            $request->input('thumbnail_data_url'),
+            (string) $published['disk'],
+            dirname((string) $published['path']),
+            ['media_id' => $storyMedia->id],
+        );
+        if ($poster) {
+            $storyMedia->thumbnail_path = $poster['thumbnail_path'];
+            $storyMedia->thumbnail_disk = $poster['thumbnail_disk'];
+            $storyMedia->thumbnail_size = $poster['thumbnail_size'];
+        }
 
         $storyMedia->source_path = $published['path'];
         $storyMedia->disk = $published['disk'];

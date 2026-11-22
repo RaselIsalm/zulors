@@ -4,6 +4,7 @@ namespace App\Services\Media\Publication;
 
 use App\Models\MediaPublicationItem;
 use App\Services\Media\Cloudflare\R2DirectUploadService;
+use App\Services\Media\VideoPosterStorageService;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
@@ -106,7 +107,7 @@ class PublicationMediaProcessor
             $metadata['is_portrait'] = $width < $height;
         }
 
-        return [
+        $output = [
             'source_path' => $output['path'],
             'disk' => $output['disk'],
             'extension' => $extension,
@@ -114,6 +115,20 @@ class PublicationMediaProcessor
             'size' => $output['size'],
             'metadata' => $metadata,
         ];
+
+        if ($item->type === 'video') {
+            $poster = app(VideoPosterStorageService::class)->store(
+                data_get($item->metadata, 'thumbnail_data_url'),
+                $output['disk'],
+                $prefix,
+                ['publication_item_id' => $item->id],
+            );
+            if ($poster) {
+                $output = array_merge($output, $poster);
+            }
+        }
+
+        return $output;
     }
 
     private function finalPrefix(mixed $publicationId, mixed $itemId, mixed $generation): string

@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use App\Jobs\User\Story\ExtractOriginalAudioFromMedia;
+use App\Jobs\Media\IngestR2VideoToCloudflareStream;
 use App\Services\Filesystem\Delete\FileDeleteService;
 use App\Services\Filesystem\Upload\ImageUploadService;
 use App\Services\Filesystem\Upload\VideoUploadService;
@@ -65,7 +66,7 @@ class ProcessStoryVideo implements ShouldQueue
 
             $this->updateProcessingProgress($frameMedia, 5, 'processing');
 
-            $remoteSource = in_array(data_get($frameMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true);
+            $remoteSource = $this->isRemoteR2Source($frameMedia);
             $videoTempOldPath = $this->prepareLocalSourceVideo($frameMedia, $videoUploadService);
             $videoUploadService->validateVideoSource($videoTempOldPath);
             $oldDisk = $frameMedia->disk;
@@ -154,6 +155,8 @@ class ProcessStoryVideo implements ShouldQueue
                 $frameMedia->metadata = $metadata;
                 $frameMedia->save();
 
+                IngestR2VideoToCloudflareStream::dispatch((int) $frameMedia->id);
+
                 $this->frameData->duration_seconds = $clipDurationSeconds;
                 $this->frameData->status = StoryStatus::ACTIVE;
 
@@ -197,6 +200,14 @@ class ProcessStoryVideo implements ShouldQueue
         return [30, 120, 300, 600];
     }
 
+    public function failed(\Throwable $exception): void
+    {
+        $media = StoryFrame::with('media')->find($this->frameData->id)?->media?->first();
+        if ($media && $media->type->isVideo() && $media->status->isProcessed()) {
+            IngestR2VideoToCloudflareStream::dispatch((int) $media->id);
+        }
+    }
+
     private function clipStartSeconds(): int
     {
         return max(0, (int) data_get($this->frameData->meta, 'video.clip_start_seconds', 0));
@@ -212,7 +223,7 @@ class ProcessStoryVideo implements ShouldQueue
 
     private function prepareLocalSourceVideo($frameMedia, VideoUploadService $videoUploadService): string
     {
-        if(! in_array(data_get($frameMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true)) {
+        if(! $this->isRemoteR2Source($frameMedia)) {
             return $frameMedia->source_path;
         }
 
@@ -245,6 +256,14 @@ class ProcessStoryVideo implements ShouldQueue
         fclose($writeStream);
 
         return $localPath;
+    }
+
+    private function isRemoteR2Source($frameMedia): bool
+    {
+        $provider = (string) data_get($frameMedia->metadata, 'provider');
+
+        return in_array($provider, ['r2_temp', 'r2_direct'], true)
+            || ($provider === 'r2' && data_get($frameMedia->metadata, 'processing_mode') === 'original_direct');
     }
 
     private function targetStorageDisk($frameMedia): string
@@ -348,7 +367,7 @@ class ProcessStoryVideo implements ShouldQueue
         $metadata = $frameMedia->metadata ?? [];
 
         return $frameMedia->status->isProcessed()
-            && in_array(data_get($metadata, 'provider'), ['r2_temp', 'r2_direct'], true)
+            && $this->isRemoteR2Source($frameMedia)
             && data_get($metadata, 'upload_state') === 'uploaded'
             && blank(data_get($metadata, 'processed_at'));
     }

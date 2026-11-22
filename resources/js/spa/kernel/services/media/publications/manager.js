@@ -140,6 +140,7 @@ export class PublicationManager {
         if ((descriptor.kind !== 'post' || selections.some(item => item.type !== 'image')) && selections.length !== 1) throw new Error('Choose one media file, or photos for a post.');
         if (descriptor.kind === 'comment' && (selections.length !== 1 || selections[0].type !== 'image')) throw new Error('A comment can include one JPEG, PNG, or WebP photo.');
         if (selections.length > 10) throw new Error('Choose up to 10 photos.');
+        await Promise.all(selections.map(item => item.poster_promise || item.capture_poster?.()).filter(Boolean));
         const client_uid = descriptor.client_uid || crypto.randomUUID();
         const native = selections.every(item => item.native_file_id);
         if (!native && selections.some(item => item.native_file_id)) throw new Error('Choose media from the same picker.');
@@ -147,6 +148,7 @@ export class PublicationManager {
             client_uid: item.client_uid, type: item.type, name: item.name, mime: item.mime, size: item.size,
             ...(item.duration_seconds ? { duration_seconds: item.duration_seconds } : {}),
             ...(item.width ? { width: item.width, height: item.height } : {}),
+            ...(item.type === 'video' && item.thumbnail_data_url ? { thumbnail_data_url: item.thumbnail_data_url } : {}),
             ...(native ? { native_file_id: item.native_file_id } : {}),
         }));
         const payload = JSON.parse(JSON.stringify({ content: '', privacy: 'all', selected_user_ids: [], ...descriptor, client_uid, items }));

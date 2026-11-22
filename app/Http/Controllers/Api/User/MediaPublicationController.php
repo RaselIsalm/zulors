@@ -60,6 +60,7 @@ class MediaPublicationController extends Controller
             'items.*.size' => ['required', 'integer', 'min:1'],
             'items.*.duration_seconds' => ['nullable', 'numeric', 'gt:0'],
             'items.*.width' => ['nullable', 'integer', 'min:1'], 'items.*.height' => ['nullable', 'integer', 'min:1'],
+            'items.*.thumbnail_data_url' => ['nullable', 'string', 'max:100000', 'regex:~\\Adata:image/jpeg;base64,[A-Za-z0-9+/=]+\\z~'],
         ]);
         $data['content'] = $data['content'] ?? '';
         $data['privacy'] = $data['privacy'] ?? 'all';

@@ -30,7 +30,8 @@ class HandleStoryCreation
         $metadata = $media->metadata ?? [];
 
         return $media->status->isProcessed()
-            && in_array(data_get($metadata, 'provider'), ['r2_temp', 'r2_direct'], true)
+            && (in_array(data_get($metadata, 'provider'), ['r2_temp', 'r2_direct'], true)
+                || (data_get($metadata, 'provider') === 'r2' && data_get($metadata, 'processing_mode') === 'original_direct'))
             && data_get($metadata, 'upload_state') === 'uploaded'
             && blank(data_get($metadata, 'processed_at'));
     }

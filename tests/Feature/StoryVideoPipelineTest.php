@@ -142,10 +142,10 @@ class StoryVideoPipelineTest extends TestCase
         $this->assertSame(100, data_get($media->metadata, 'background_processing_progress'));
         $this->assertTrue(data_get($media->metadata, 'instant_publish'));
 
-        Queue::assertNotPushed(ProcessStoryVideo::class);
+        Queue::assertPushed(ProcessStoryVideo::class);
     }
 
-    public function test_story_direct_upload_publishes_immediately_without_background_processing(): void
+    public function test_story_direct_upload_publishes_immediately_and_queues_background_video_processing(): void
     {
         Queue::fake();
         \Illuminate\Support\Facades\Storage::fake('r2_temp');
@@ -165,8 +165,14 @@ class StoryVideoPipelineTest extends TestCase
         $this->postJson('/api/story/editor/create', [])->assertUnprocessable();
         $this->postJson('/api/story/editor/media/video/direct/complete', $identity)->assertUnprocessable();
         \Illuminate\Support\Facades\Storage::disk('r2_temp')->put($upload['uid'], str_repeat('x', 1024));
+        $poster = imagecreatetruecolor(32, 32);
+        ob_start();
+        imagejpeg($poster, null, 68);
+        $posterBytes = ob_get_clean();
+        imagedestroy($poster);
         $completed = $this->postJson('/api/story/editor/media/video/direct/complete', $identity + [
             'parts' => [['part_number' => 1, 'etag' => 'test']],
+            'thumbnail_data_url' => 'data:image/jpeg;base64,'.base64_encode($posterBytes),
         ])->assertOk()
             ->assertJsonPath('data.metadata.upload_state', 'uploaded')
             ->assertJsonPath('data.metadata.processing_state', 'processed');
@@ -177,10 +183,12 @@ class StoryVideoPipelineTest extends TestCase
             ->assertJsonPath('data.status', StoryStatus::ACTIVE->value)
             ->assertJsonPath('data.can_open', true)
             ->assertJsonPath('data.progress.stage', 'ready');
-        Queue::assertNotPushed(ProcessStoryVideo::class);
+        Queue::assertPushed(ProcessStoryVideo::class);
         $story = $owner->fresh()->story;
         $media = $story->frames()->with('media')->firstOrFail()->media->firstOrFail();
         \Illuminate\Support\Facades\Storage::disk('r2_final')->assertExists($media->source_path);
+        \Illuminate\Support\Facades\Storage::disk('r2_final')->assertExists($media->thumbnail_path);
+        $this->assertSame('image/jpeg', getimagesizefromstring(\Illuminate\Support\Facades\Storage::disk('r2_final')->get($media->thumbnail_path))['mime']);
 
         $viewerPayload = $this->getJson("/api/stories/stories/{$story->story_uuid}")
             ->assertOk()

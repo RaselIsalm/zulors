@@ -135,6 +135,35 @@ class StoryProcessingVisibilityTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_stream_story_view_adds_a_conservative_single_frame_delivery_estimate(): void
+    {
+        config([
+            'media.cloudflare.stream.enabled' => true,
+            'media.cloudflare.stream.account_id' => 'account-test',
+            'media.cloudflare.stream.api_token' => 'token-test',
+            'media.cloudflare.stream.webhook_secret' => 'webhook-test',
+        ]);
+
+        $owner = $this->createUser('story-stream-owner');
+        $viewer = $this->createUser('story-stream-viewer');
+        $story = $this->createStory($owner);
+        $frame = $this->createStoryFrame($story, [
+            'status' => StoryStatus::ACTIVE,
+            'type' => StoryType::VIDEO,
+            'duration_seconds' => 8,
+        ], MediaStatus::PROCESSED, [
+            'duration_seconds' => 8,
+            'stream' => ['uid' => 'story-stream-uid', 'state' => 'ready'],
+        ]);
+
+        $this->actingAs($viewer)->withoutMiddleware()
+            ->postJson('/api/stories/views/record', ['frame_id' => $frame->id])
+            ->assertOk();
+        $this->postJson('/api/stories/views/record', ['frame_id' => $frame->id])->assertOk();
+
+        $this->assertSame(8, (int) \Illuminate\Support\Facades\DB::table('cloudflare_stream_monthly_usage')->value('delivered_seconds'));
+    }
+
     public function test_story_create_resets_publish_time_and_sets_24_hour_expiry(): void
     {
         config(['story.expire_after_hours' => 24]);
