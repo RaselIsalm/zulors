@@ -80,6 +80,32 @@ class CloudflareStreamPilotTest extends TestCase
         }
     }
 
+    public function test_canonical_r2_video_is_playable_before_optional_background_processing_finishes(): void
+    {
+        Storage::shouldReceive('disk')->once()->with('r2_final')->andReturn(new class
+        {
+            public function url(string $path): string
+            {
+                return 'https://media.example.test/'.$path;
+            }
+        });
+
+        $media = new Media([
+            'source_path' => 'posts/instant.mp4',
+            'disk' => 'r2_final',
+            'type' => MediaType::VIDEO,
+            'status' => MediaStatus::PROCESSING,
+            'metadata' => [
+                'provider' => 'r2',
+                'final_disk' => 'r2_final',
+                'upload_state' => 'uploaded',
+                'background_processing_state' => 'queued',
+            ],
+        ]);
+
+        $this->assertSame('https://media.example.test/posts/instant.mp4', $media->source_url);
+    }
+
     public function test_stream_webhook_requires_fresh_cloudflare_hmac_and_switches_r2_media_only_when_ready(): void
     {
         $media = Media::create([

@@ -82,6 +82,12 @@ class Media extends Model
             return route('downloads.document.index', ['mediaId' => $this->id]);
         }
         else if($this->type->isAudio() || $this->type->isVideo()) {
+            // A completed direct R2 upload is already a valid playback asset.
+            // Do not make the feed wait for optional HLS/transcoding jobs.
+            if ($this->type->isVideo() && $this->isCanonicalR2Source()) {
+                return storage_url($this->source_path, $this->disk);
+            }
+
             if(! $this->status->isProcessed()) {
                 return null;
             }
@@ -92,6 +98,17 @@ class Media extends Model
         }
 
         return storage_url($this->source_path, $this->disk);
+    }
+
+    private function isCanonicalR2Source(): bool
+    {
+        $metadata = $this->metadata ?? [];
+        $finalDisk = (string) data_get($metadata, 'final_disk', config('media.cloudflare.r2.final_disk', 'r2_final'));
+
+        return data_get($metadata, 'provider') === 'r2'
+            && data_get($metadata, 'upload_state') === 'uploaded'
+            && $this->disk === $finalDisk
+            && filled($this->source_path);
     }
 
     public function getThumbnailUrlAttribute()

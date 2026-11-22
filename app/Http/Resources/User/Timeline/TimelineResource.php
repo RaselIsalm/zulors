@@ -34,7 +34,9 @@ class TimelineResource extends JsonResource
 
         $apiData = [
             'id' => $this->id,
-            'content' => e($this->content),
+            // JSON consumers escape text at render time. Encoding here causes
+            // visible entities such as `&#039;` in the feed and profile.
+            'content' => html_entity_decode((string) $this->content, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
             'type' => $this->type,
             'status' => $this->status,
             'text_language' => $this->text_language,

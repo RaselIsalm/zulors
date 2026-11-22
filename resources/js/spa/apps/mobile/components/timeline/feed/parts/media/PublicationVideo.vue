@@ -70,7 +70,7 @@
 				}
 
 				return MediaStatusUtils.isProcessed(item.status)
-					|| (['r2_temp', 'r2_direct'].includes(item.metadata?.provider)
+					|| (['r2', 'r2_temp', 'r2_direct'].includes(item.metadata?.provider)
 						&& item.metadata?.upload_state === 'uploaded'
 						&& Boolean(item.preview_url));
 			});

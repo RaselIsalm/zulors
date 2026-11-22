@@ -15,6 +15,8 @@ class MediaResource extends JsonResource
             'id' => $this->id,
             'mediaable_id' => $this->mediaable_id,
             'source_url' => $this->source_url,
+            'playback_ready' => $this->type->isVideo() && filled($this->source_url),
+            'playback_mode' => $this->type->isVideo() && data_get($this->metadata, 'provider') === 'r2' ? 'r2_direct' : null,
             'preview_url' => $this->getPreviewUrl(),
             'extension' => $this->extension,
             'type' => $this->type->value,
