@@ -88,6 +88,7 @@
 	import { useInputHandlers } from '@/kernel/vue/composables/input/index.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { applyVideoPresentationMetadata, buildVideoPresentationMetadata, readVideoFileMetadata } from '@/kernel/services/media/video-metadata.js';
+	import { captureVideoPoster } from '@/kernel/services/media/video-poster.js';
 	import { materializePublicationFile } from '@/kernel/services/media/publications/selection.js';
 	import { mergePostMediaPreviews } from '@/kernel/services/media/post-media-preview.js';
 	import { createMultipartUploadProgress, uploadMultipartPartsAdaptive } from '@/kernel/services/media/multipart-upload-progress.js';
@@ -660,6 +661,7 @@
 				postEditorStore.setVideoUploadActive(true);
 
 				const localPreview = createLocalMediaPreview(mediaFile, 'video');
+				const posterPromise = typeof captureVideoPoster === 'function' ? captureVideoPoster(mediaFile) : Promise.resolve('');
 				let uploadData = null;
 				let uploadFile = mediaFile;
 				const presentationMetadata = buildVideoPresentationMetadata(mediaFile.width, mediaFile.height, mediaFile.duration_seconds);
@@ -667,6 +669,11 @@
 				if(localPreview) {
 					clearLocalMediaPreviews();
 					state.localMediaPreviews.push(localPreview);
+					posterPromise.then((poster) => {
+						if (poster) {
+							localPreview.thumbnail_url = poster;
+						}
+					}).catch(() => {});
 				}
 
 				try {
@@ -744,6 +751,8 @@
 						upload_id: uploadData.upload_id,
 						parts: completedParts || []
 					};
+					const thumbnailDataUrl = await posterPromise;
+					if (thumbnailDataUrl) completionData.thumbnail_data_url = thumbnailDataUrl;
 
 					let completionError = null;
 					let completionResponse = null;
