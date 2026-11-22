@@ -7,6 +7,7 @@ import {
 } from '@/kernel/services/media/reel-preload-policy.js';
 
 const prefetchedUrls = new Map();
+const prefetchedVideoUrls = new Map();
 let queuedPosts = new Map();
 let queuedLimit = 0;
 let prefetchHandle = null;
@@ -32,6 +33,34 @@ function prefetchImage(url) {
     image.src = url;
 }
 
+// Warming the first byte range lets the browser establish the R2 connection
+// and read the MP4 header before the card becomes visible.  A preload hint is
+// used instead of downloading the whole file so quality is never sacrificed
+// and mobile data is not consumed for videos the user never watches.
+function prefetchDirectVideo(url) {
+	if(! url || ! canPrefetch() || prefetchedVideoUrls.has(url)) {
+		return;
+	}
+
+	prefetchedVideoUrls.set(url, 1);
+
+	const link = document.createElement('link');
+	link.rel = 'preload';
+	link.as = 'video';
+	link.href = url;
+	link.setAttribute('fetchpriority', 'low');
+	link.crossOrigin = 'anonymous';
+	(document.head || document.documentElement)?.appendChild(link);
+
+	// Keep the hint around for the browser cache, but cap the DOM growth.
+	if(prefetchedVideoUrls.size > 40) {
+		const oldest = prefetchedVideoUrls.keys().next().value;
+		prefetchedVideoUrls.delete(oldest);
+		const links = document.querySelectorAll?.('link[rel="preload"][as="video"]') || [];
+		Array.from(links).find((candidate) => candidate.href === oldest || candidate.getAttribute('href') === oldest)?.remove();
+	}
+}
+
 function prefetchPostMedia(postData, state) {
 	const mediaItems = postData?.relations?.media || [];
 
@@ -42,6 +71,10 @@ function prefetchPostMedia(postData, state) {
 
 		if(mediaItem.type === 'video') {
 			prefetchImage(mediaItem.thumbnail_url);
+			const source = buildAdaptiveVideoSource(mediaItem);
+			if(source.transport === 'direct') {
+				prefetchDirectVideo(source.url);
+			}
 		}
 		else {
 			prefetchImage(mediaItem.source_url);
@@ -209,6 +242,9 @@ function prefetchReelsPlaybackWindow(posts = [], activeIndex = 0) {
             }
 
             const source = buildAdaptiveVideoSource(mediaItem);
+			if(source.transport === 'direct' && !networkProfile.offline && !networkProfile.saveData) {
+				prefetchDirectVideo(source.url);
+			}
 
             return [mediaItem.thumbnail_url, source.transport === 'hls' ? source.url : ''].filter(Boolean);
         });

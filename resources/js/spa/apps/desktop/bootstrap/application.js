@@ -15,11 +15,13 @@ import { installPerformanceMonitoring, installRouterPerformance } from '@/kernel
 import ZulorsDesktop from '@D/bootstrap/boot/ZulorsDesktop.vue';
 import PrimeVue from 'primevue/config';
 import globalProperties from '@/kernel/vue/plugins/global.properties.js';
+import { installAppLifecycleState } from '@/kernel/services/app-lifecycle-state.js';
 
 const Application = createApp(ZulorsDesktop);
 
 installPerformanceMonitoring();
 installRouterPerformance(Router);
+installAppLifecycleState(Router, 'desktop');
 
 function humanizeI18nKey(key) {
     return String(key)

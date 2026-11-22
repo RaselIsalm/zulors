@@ -19,6 +19,7 @@ import globalProperties from '@/kernel/vue/plugins/global.properties.js';
 import globalHelpers from '@M/core/global/global.helpers.js';
 import LanguageMessages from '@/lang/index.js';
 import { installViewportKeyboardGuard } from '@/kernel/vue/composables/input/index.js';
+import { installAppLifecycleState } from '@/kernel/services/app-lifecycle-state.js';
 
 if(/\bZulors(Android|Local)App\b/.test(navigator.userAgent)) {
     document.documentElement.classList.add('zulors-android-app');
@@ -108,6 +109,7 @@ Application.use(ZulorsI18n);
 Application.config.globalProperties.$t = translate;
 
 installNativeBackBridge(Router);
+installAppLifecycleState(Router, 'mobile');
 
 Application.component('Border', defineAsyncComponent(() => {
     return import("@/kernel/vue/components/general/Border.vue");
