@@ -11,7 +11,7 @@ const positiveNumber = (value) => {
 };
 
 export const normalizeVideoDimensions = (metadata = {}) => {
-    const dimensions = metadata?.dimensions || {};
+    const dimensions = metadata?.display_dimensions || metadata?.dimensions || {};
     const width = Math.round(positiveNumber(dimensions.width || metadata.width || metadata.video_width));
     const height = Math.round(positiveNumber(dimensions.height || metadata.height || metadata.video_height));
 

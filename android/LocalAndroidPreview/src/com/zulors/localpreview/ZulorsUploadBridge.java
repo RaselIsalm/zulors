@@ -119,7 +119,7 @@ final class ZulorsUploadBridge implements UploadCoordinator.Listener {
             if (mimes.isEmpty()) throw new IllegalArgumentException("unsupported_media");
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                 .putExtra(Intent.EXTRA_MIME_TYPES, mimes.toArray(new String[0])).putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             pendingPick = new Pick(id, coordinator.account(), proxy, currentDocument, multiple ? 30 : 1);
             activity.startActivityForResult(intent, PICK_REQUEST);
         } catch (Exception error) { pendingPick = null; reply(proxy, id, null, error, currentDocument); }
@@ -142,6 +142,12 @@ final class ZulorsUploadBridge implements UploadCoordinator.Listener {
                 JSONArray items = new JSONArray();
                 for (Uri uri : uris) {
                     if (!pick.account.equals(coordinator.account())) throw new IllegalArgumentException("account_changed");
+                    try {
+                        activity.getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (SecurityException ignored) {
+                        // Some providers grant one-shot access only. importFile
+                        // copies the bytes before this result is released.
+                    }
                     items.put(UploadFiles.importFile(activity.getApplicationContext(), coordinator.store, pick.account, uri));
                 }
                 if (!pick.account.equals(coordinator.account())) throw new IllegalArgumentException("account_changed");

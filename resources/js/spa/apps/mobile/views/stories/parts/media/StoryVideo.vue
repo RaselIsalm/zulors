@@ -1,6 +1,10 @@
 <template>
     <div class="story-media-stage">
         <StoryMediaLoader v-if="isLoading || hasError" class="absolute inset-0 z-20" v-bind:lqipBase64="previewUrl" v-bind:showSpinner="isLoading && !hasError"></StoryMediaLoader>
+        <div v-if="hasError" class="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/45 px-6 text-center text-white">
+            <p class="text-sm">{{ errorMessage }}</p>
+            <button type="button" class="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black" v-on:click="retryMedia">Retry</button>
+        </div>
         <video
             v-if="showBlurBackdrop && mediaSourceUrl"
             ref="storyBackdropVideo"
@@ -15,6 +19,7 @@
         ></video>
         <div v-if="showBlurBackdrop" class="story-media-backdrop-shade"></div>
         <video
+            v-bind:key="reloadToken"
             v-bind:src="mediaSourceUrl"
             v-bind:poster="previewUrl"
             v-bind:class="[isLoading ? 'opacity-0' : 'opacity-100', foregroundFitClass]"
@@ -54,6 +59,7 @@
             const storyBackdropVideo = ref(null);
             const isLoading = ref(true);
             const hasError = ref(false);
+            const reloadToken = ref(0);
             const frameData = ref(props.frameData);
             const playerState = inject('playerState');
             const loadedDimensions = ref({});
@@ -64,6 +70,16 @@
                 return mediaItem.value.source_url || mediaItem.value.preview_url || '';
             });
             const previewUrl = computed(() => mediaItem.value.lqip_base64 || mediaItem.value.thumbnail_url || '');
+            const errorMessage = computed(() => mediaSourceUrl.value
+                ? 'This video could not be played.'
+                : 'This video is still being prepared.');
+
+            watch(mediaSourceUrl, (url) => {
+                if (!url) {
+                    isLoading.value = false;
+                    hasError.value = true;
+                }
+            }, { immediate: true });
             
             onMounted(() => {
                 if (hasAttachedMusic() || localStorage.getItem('stories_videos_muted')) {
@@ -153,6 +169,8 @@
                 mediaSourceUrl: mediaSourceUrl,
                 previewUrl: previewUrl,
                 hasError: hasError,
+                errorMessage: errorMessage,
+                reloadToken: reloadToken,
                 foregroundFitClass: computed(() => {
                     return storyMediaObjectFitClass(mediaItem.value, loadedDimensions.value);
                 }),
@@ -172,7 +190,21 @@
                     colibriEventBus.emit('story:play');
                 },
                 onMediaError: () => {
+                    isLoading.value = false;
                     hasError.value = true;
+                },
+                retryMedia: () => {
+                    hasError.value = false;
+                    isLoading.value = true;
+                    reloadToken.value += 1;
+                    requestAnimationFrame(() => {
+                        if (!storyVideo.value || !mediaSourceUrl.value) {
+                            isLoading.value = false;
+                            hasError.value = true;
+                            return;
+                        }
+                        storyVideo.value.load();
+                    });
                 }
             }
         },

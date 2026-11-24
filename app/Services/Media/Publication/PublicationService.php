@@ -13,6 +13,7 @@ use App\Services\Safety\SafetyService;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -182,6 +183,14 @@ class PublicationService
             abort_unless($disk->exists($upload['path']) && (int) $disk->size($upload['path']) === $item->size, 422, 'Uploaded bytes do not match the selected file.');
             $item->update(['status' => 'uploaded', 'progress' => 100, 'dispatched_at' => now(), 'queued_at' => now()]);
             $publication->update(['status' => 'processing', 'error' => null]);
+            Log::info('media_publication.upload_verified', [
+                'publication_id' => $publication->id,
+                'item_id' => $item->id,
+                'kind' => $publication->kind,
+                'type' => $item->type,
+                'bytes' => (int) $item->size,
+                'generation' => (int) $item->generation,
+            ]);
             // Completion verifies the R2 object and promotes it with a storage-side
             // copy. User media bytes never enter a VPS worker for processing.
             return app(PublicationFinalizer::class)->finalize($publication->id) ?? $publication->load('items');

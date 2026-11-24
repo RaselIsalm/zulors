@@ -292,10 +292,6 @@ class StoryMediaController extends Controller
                 );
             }
 
-            if(! $r2DirectUploadService->uploaded($storyMedia->source_path, $storyMedia->disk)) {
-                throw new Exception('Direct story video file was not found on R2.');
-            }
-
             $r2DirectUploadService->verifyUploadedVideo($storyMedia->source_path, $storyMedia->disk, (int) $storyMedia->size);
             $temporaryPath = $storyMedia->source_path;
             $temporaryDisk = $storyMedia->disk;
@@ -323,13 +319,14 @@ class StoryMediaController extends Controller
             'upload_state' => 'uploaded',
             'upload_progress' => 100,
             'upload_completed_at' => now()->toIso8601String(),
-            'processing_state' => 'processed',
-            'processing_progress' => 100,
+            'processing_state' => 'queued',
+            'processing_progress' => 1,
             'processing_updated_at' => now()->toIso8601String(),
             'original_size' => (int) ($storyMedia->size ?: data_get($metadata, 'original_size', 0)),
             'processing_mode' => 'original_direct',
-            'background_processing_state' => 'skipped',
-            'background_processing_progress' => 100,
+            'playback_state' => 'processing',
+            'background_processing_state' => 'queued',
+            'background_processing_progress' => 1,
             'temp_path' => data_get($metadata, 'temp_path', $temporaryPath),
             'temp_disk' => data_get($metadata, 'temp_disk', $temporaryDisk),
             'final_disk' => $published['disk'],
@@ -703,12 +700,16 @@ class StoryMediaController extends Controller
 
     private function buildStoryVideoPreviewPayload(Media $storyMedia, array $clipData): array
     {
+        $playbackUrl = $this->storyMediaCanPreviewOriginal($storyMedia)
+            ? $this->storyMediaPlaybackUrl($storyMedia)
+            : null;
+
         return [
             'id' => $storyMedia->id,
             'status' => $storyMedia->status->value,
             'type' => 'video',
-            'source_url' => $this->storyMediaCanPreviewOriginal($storyMedia) ? $this->storyEditorVideoPreviewUrl($storyMedia->id) : null,
-            'preview_url' => $this->storyMediaCanPreviewOriginal($storyMedia) ? $this->storyEditorVideoPreviewUrl($storyMedia->id) : null,
+            'source_url' => $playbackUrl,
+            'preview_url' => $playbackUrl,
             'thumbnail_url' => filled($storyMedia->thumbnail_path) ? storage_url($storyMedia->thumbnail_path, $storyMedia->thumbnail_disk) : null,
             'duration' => parse_duration($clipData['duration_seconds']),
             'duration_seconds' => $clipData['duration_seconds'],
@@ -719,6 +720,7 @@ class StoryMediaController extends Controller
                 'upload_state' => data_get($storyMedia->metadata, 'upload_state'),
                 'processing_state' => data_get($storyMedia->metadata, 'processing_state'),
                 'processing_progress' => data_get($storyMedia->metadata, 'processing_progress', 0),
+                'playback_state' => data_get($storyMedia->metadata, 'playback_state', 'processing'),
                 'temp_disk' => data_get($storyMedia->metadata, 'temp_disk'),
                 'final_disk' => data_get($storyMedia->metadata, 'final_disk'),
                 'original_size' => data_get($storyMedia->metadata, 'original_size', $storyMedia->size),
@@ -739,12 +741,24 @@ class StoryMediaController extends Controller
 
     private function storyMediaCanPreviewOriginal(Media $storyMedia): bool
     {
-        return ! in_array(data_get($storyMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true);
+        return data_get($storyMedia->metadata, 'processing_state') === 'processed'
+            && ! in_array(data_get($storyMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true);
     }
 
     private function storyEditorVideoPreviewUrl(int $mediaId): string
     {
         return url("/api/story/editor/media/video/preview/{$mediaId}");
+    }
+
+    private function storyMediaPlaybackUrl(Media $storyMedia): string
+    {
+        if (data_get($storyMedia->metadata, 'provider') === 'r2'
+            && filled($storyMedia->source_path)
+            && filled($storyMedia->disk)) {
+            return storage_url($storyMedia->source_path, $storyMedia->disk);
+        }
+
+        return $this->storyEditorVideoPreviewUrl($storyMedia->id);
     }
 
     private function persistStoryVideoSource(

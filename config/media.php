@@ -65,6 +65,13 @@ return [
             'raw_fallback_max_mb' => 0,
             'part_fallback_max_mb' => 0,
             'temp_preview_expiry_minutes' => (int) env('R2_TEMP_PREVIEW_EXPIRY_MINUTES', 30),
+            // R2 is eventually consistent around multipart completion and
+            // server-side copy. Keep completion bounded and retryable without
+            // blocking a request forever.
+            'publish_retry_attempts' => (int) env('R2_PUBLISH_RETRY_ATTEMPTS', 5),
+            'publish_retry_delay_ms' => (int) env('R2_PUBLISH_RETRY_DELAY_MS', 250),
+            'verify_retry_attempts' => (int) env('R2_VERIFY_RETRY_ATTEMPTS', 5),
+            'verify_retry_delay_ms' => (int) env('R2_VERIFY_RETRY_DELAY_MS', 250),
             // Configure bucket CORS out of band; upload requests must not mutate
             // bucket-wide policy using an Origin supplied by the browser.
             'auto_cors_enabled' => env('R2_DIRECT_UPLOAD_AUTO_CORS_ENABLED', false),

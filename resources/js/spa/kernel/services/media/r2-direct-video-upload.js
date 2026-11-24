@@ -97,7 +97,8 @@ export async function directVideoUpload({ file, options, request, onProgress, on
     const uploadRequestedAt = performance.now();
     let identity = null;
     let pendingProgress = Promise.resolve();
-    let lastProgress = -10;
+    let lastProgress = -1;
+    let lastProgressAt = 0;
 
     try {
         onStage?.({ stage: 'uploading', progress: 0, label: 'uploading_original_to_r2' });
@@ -112,8 +113,13 @@ export async function directVideoUpload({ file, options, request, onProgress, on
         });
         const parts = await uploadR2DirectVideo(upload, uploadFile, progress => {
             onProgress?.(progress);
-            if(progress >= lastProgress + 10) {
+            const now = performance.now();
+            // Persist real byte progress frequently enough for a slow camera
+            // upload to leave the visible 0% state, while avoiding one API
+            // request per XHR progress event.
+            if(progress === 100 || progress === 0 || progress >= lastProgress + 1 || now - lastProgressAt >= 750) {
                 lastProgress = progress;
+                lastProgressAt = now;
                 pendingProgress = pendingProgress.then(() => request('progress', {
                     ...identity, upload_state: 'uploading', upload_progress: progress,
                 })).catch(() => {});

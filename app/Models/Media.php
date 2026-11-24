@@ -82,6 +82,10 @@ class Media extends Model
             return route('downloads.document.index', ['mediaId' => $this->id]);
         }
         else if($this->type->isAudio() || $this->type->isVideo()) {
+            if ($this->type->isVideo() && in_array(data_get($this->metadata, 'playback_state'), ['processing', 'failed'], true)) {
+                return null;
+            }
+
             // A completed direct R2 upload is already a valid playback asset.
             // Do not make the feed wait for optional HLS/transcoding jobs.
             if ($this->type->isVideo() && $this->isCanonicalR2Source()) {

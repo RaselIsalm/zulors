@@ -132,16 +132,19 @@ class ProcessStoryVideo implements ShouldQueue
                 }
 
                 $metadata = $frameMedia->metadata ?? [];
+                $originalStorage = $this->preserveOriginalSource($frameMedia, $oldDisk, $oldPath, $oldSize);
                 $metadata = array_merge($metadata, $this->presentationMetadata($processedDimensions), [
                     'provider' => in_array(data_get($metadata, 'provider'), ['r2_temp', 'r2_direct'], true) ? 'r2' : data_get($metadata, 'provider'),
                     'processing_progress' => 100,
                     'processing_state' => 'processed',
+                    'playback_state' => 'ready',
                     'processing_updated_at' => now()->toIso8601String(),
                     'processing_error' => null,
                     'processed_at' => now()->toIso8601String(),
                     'background_processing_state' => 'processed',
                     'background_processing_progress' => 100,
                     'original_size' => $oldSize,
+                    'original_storage' => $originalStorage,
                     'optimized_size' => (int) ($videoData['video_size'] ?? $oldSize),
                     'optimization_ratio' => $this->optimizationRatio($oldSize, (int) ($videoData['video_size'] ?? $oldSize)),
                 ]);
@@ -333,6 +336,7 @@ class ProcessStoryVideo implements ShouldQueue
         }
 
         if($state === 'failed') {
+            $metadata['playback_state'] = 'failed';
             if($this->isInstantR2MediaAwaitingOptimization($frameMedia)) {
                 $metadata['processing_error'] = 'Background story video optimization failed. Raw playback remains available.';
             }
@@ -389,22 +393,37 @@ class ProcessStoryVideo implements ShouldQueue
     {
         $fileDeleteService->setStorageDisk('local')->deleteFile($localPath);
 
-        if($oldDisk !== 'local') {
-            try {
-                if(! Storage::disk($oldDisk)->delete($oldPath)) {
-                    throw new \RuntimeException('Original media deletion failed.');
-                }
-            }
-            catch (\Throwable $e) {
-                Log::warning('Processed video original cleanup deferred.', ['media_id' => $mediaId]);
-                try {
-                    \App\Jobs\CleanupProcessedMediaSource::dispatch($mediaId, $oldDisk, $oldPath);
-                }
-                catch (\Throwable $queueError) {
-                    Log::error('Original cleanup could not be queued; temp lifecycle must remove it.', ['media_id' => $mediaId]);
-                }
-            }
+        // Remote originals are deliberately retained at the archived path in
+        // metadata. This prevents a failed canonical encode from destroying
+        // the only copy of a camera recording.
+        if($oldDisk === 'local' && $oldPath !== $localPath) {
+            Storage::disk($oldDisk)->delete($oldPath);
         }
+    }
+
+    private function preserveOriginalSource($media, string $sourceDisk, string $sourcePath, int $sourceSize): array
+    {
+        $extension = strtolower((string) ($media->extension ?: 'mp4'));
+        if(! preg_match('/\A[a-z0-9]{2,8}\z/', $extension)) $extension = 'mp4';
+
+        $archivePath = "uploads/stories/videos/originals/{$media->id}/original.{$extension}";
+        $disk = Storage::disk($sourceDisk);
+
+        if(! $disk->exists($sourcePath)) {
+            throw new \RuntimeException('Original story video source is missing before canonical processing.');
+        }
+
+        if($sourcePath !== $archivePath && ! $disk->exists($archivePath) && ! $disk->copy($sourcePath, $archivePath)) {
+            throw new \RuntimeException('Original story video could not be archived.');
+        }
+
+        return [
+            'disk' => $sourceDisk,
+            'path' => $archivePath,
+            'extension' => $extension,
+            'mime' => (string) ($media->mime ?: 'video/mp4'),
+            'size' => $sourceSize,
+        ];
     }
 
     private function queueOriginalAudioExtraction($frameMedia): void

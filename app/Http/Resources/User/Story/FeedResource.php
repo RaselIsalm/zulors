@@ -58,7 +58,11 @@ class FeedResource extends JsonResource
     private function getProcessingFrame()
     {
         return $this->frames->filter(function($frame) {
-            return $frame->status->isProcessing()
+            $media = $frame->media->first();
+            $videoAwaitingPlayback = $media?->type?->isVideo()
+                && data_get($media->metadata, 'playback_state') === 'processing';
+
+            return ($frame->status->isProcessing() || $videoAwaitingPlayback)
                 && $this->isFrameUnexpired($frame)
                 && $this->isFrameProcessable($frame);
         })->sortByDesc('id')->first();

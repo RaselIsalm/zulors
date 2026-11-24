@@ -14,7 +14,9 @@ class HandleStoryCreation
     {
         $media = $event->frameData->media->first();
 
-        if($event->frameData->type->isVideo() && (! $media?->status->isProcessed() || $this->isInstantR2MediaAwaitingOptimization($media))) {
+        if($event->frameData->type->isVideo()
+            && blank(data_get($media?->metadata, 'processing_dispatch_source'))
+            && (! $media?->status->isProcessed() || $this->isInstantR2MediaAwaitingOptimization($media))) {
             ProcessStoryVideo::dispatch($event->frameData)->onQueue(config('media.queues.video_high'));
         }
 

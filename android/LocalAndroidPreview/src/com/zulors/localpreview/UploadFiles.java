@@ -4,6 +4,8 @@ import android.content.Context;
 import android.database.Cursor;
 import android.graphics.BitmapFactory;
 import android.media.MediaMetadataRetriever;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 import android.webkit.WebResourceRequest;
@@ -29,6 +31,7 @@ final class UploadFiles {
             case "mp4": case "m4v": containerMime = "video/mp4"; break;
             case "mov": containerMime = "video/quicktime"; break;
             case "webm": containerMime = "video/webm"; break;
+            case "mpg": case "mpeg": containerMime = "video/mpeg"; break;
             case "3gp": containerMime = "video/3gpp"; break;
             case "3g2": containerMime = "video/3gpp2"; break;
             case "mkv": containerMime = "video/x-matroska"; break;
@@ -81,14 +84,23 @@ final class UploadFiles {
                 MediaMetadataRetriever retriever = new MediaMetadataRetriever();
                 try {
                     retriever.setDataSource(target.getAbsolutePath());
-                    metadata.put("duration_seconds", Double.parseDouble(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)) / 1000);
+                    String duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                    if (duration != null) metadata.put("duration_seconds", Double.parseDouble(duration) / 1000);
                     int width = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
                     int height = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
                     String rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
                     boolean rotated = "90".equals(rotation) || "270".equals(rotation);
-                    metadata.put("width", rotated ? height : width).put("height", rotated ? width : height);
+                    int displayWidth = rotated ? height : width;
+                    int displayHeight = rotated ? width : height;
+                    metadata.put("coded_width", width).put("coded_height", height)
+                        .put("width", displayWidth).put("height", displayHeight)
+                        .put("display_width", displayWidth).put("display_height", displayHeight)
+                        .put("rotation", rotation == null ? 0 : Integer.parseInt(rotation));
+                    String container = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE);
+                    if (container != null && !container.isEmpty()) metadata.put("container_mime", container);
                 } catch (Exception ignored) { /* Metadata is optional; the server validates the media. */ }
                 finally { retriever.release(); }
+                addTrackMetadata(target, metadata);
             } else {
                 BitmapFactory.Options options = new BitmapFactory.Options(); options.inJustDecodeBounds = true;
                 BitmapFactory.decodeFile(target.getAbsolutePath(), options);
@@ -100,6 +112,25 @@ final class UploadFiles {
         } finally {
             temporary.delete();
             if (!committed) target.delete();
+        }
+    }
+
+    private static void addTrackMetadata(File file, JSONObject metadata) {
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+            extractor.setDataSource(file.getAbsolutePath());
+            for (int index = 0; index < extractor.getTrackCount(); index++) {
+                MediaFormat format = extractor.getTrackFormat(index);
+                String trackMime = format.getString(MediaFormat.KEY_MIME);
+                if (trackMime == null) continue;
+                if (trackMime.startsWith("video/") && !metadata.has("video_codec")) metadata.put("video_codec", trackMime);
+                if (trackMime.startsWith("audio/") && !metadata.has("audio_codec")) metadata.put("audio_codec", trackMime);
+            }
+        } catch (Exception ignored) {
+            // Codec probing is advisory on-device; the server performs the
+            // authoritative compatibility probe before canonical processing.
+        } finally {
+            try { extractor.release(); } catch (Exception ignored) {}
         }
     }
 

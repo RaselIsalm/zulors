@@ -134,7 +134,7 @@ class PublicationFinalizerTest extends TestCase
         $this->assertSame(PostStatus::ACTIVE, $post->status);
         $this->assertSame(MediaStatus::PROCESSED, $media->status);
         $this->assertSame('r2_final', $media->disk);
-        $this->assertSame('ready', data_get($media->metadata, 'playback_state'));
+        $this->assertSame('processing', data_get($media->metadata, 'playback_state'));
         $this->assertSame('queued', data_get($media->metadata, 'background_processing_state'));
         $this->assertSame('queued', data_get($media->metadata, 'playback.hls_state'));
         $this->assertNull(data_get($media->metadata, 'playback.hls'));

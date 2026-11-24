@@ -20,6 +20,7 @@ use App\Database\Configs\Table;
 use App\Enums\Media\MediaStatus;
 use App\Enums\Story\StoryStatus;
 use App\Events\User\Story\StoryCreatedEvent;
+use App\Jobs\User\Story\ProcessStoryVideo;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\User\Story\FeedCollection;
 use App\Http\Resources\User\Story\FeedResource;
@@ -123,9 +124,8 @@ class StoryController extends Controller
             $isUploadedR2Video = $isVideo
                 && in_array(data_get($storyMedia->metadata, 'provider'), ['r2', 'r2_temp', 'r2_direct'], true)
                 && data_get($storyMedia->metadata, 'upload_state') === 'uploaded';
-            $isOriginalDirectVideo = $isUploadedR2Video
-                && data_get($storyMedia->metadata, 'provider') === 'r2'
-                && $storyMedia->status->isProcessed();
+            $shouldDispatchR2Video = $isUploadedR2Video
+                && data_get($storyMedia->metadata, 'processing_dispatch_source') !== 'story_controller';
             $publishedAt = now();
             $expiresAt = $publishedAt->copy()->addHours(max(1, (int) config('story.expire_after_hours', 24)));
 
@@ -194,25 +194,29 @@ class StoryController extends Controller
                     'upload_progress' => 100,
                     'upload_state' => 'uploaded',
                     'upload_completed_at' => now()->toIso8601String(),
-                    'processing_progress' => $isOriginalDirectVideo || $isUploadedR2Video ? 100 : 1,
-                    'processing_state' => $isOriginalDirectVideo ? 'processed' : 'queued',
-                    'processing_dispatched_at' => $isOriginalDirectVideo
-                        ? data_get($storyMedia->metadata, 'processing_dispatched_at')
-                        : now()->toIso8601String(),
+                    'processing_progress' => 1,
+                    'processing_state' => 'queued',
+                    'processing_dispatched_at' => $isUploadedR2Video ? now()->toIso8601String() : null,
                     'processing_updated_at' => now()->toIso8601String()
                 ]);
 
                 if($isUploadedR2Video) {
                     $metadata = array_merge($metadata, [
-                        'background_processing_state' => $isOriginalDirectVideo ? 'skipped' : 'queued',
-                        'background_processing_progress' => 100,
-                        'instant_publish' => true,
+                        'playback_state' => 'processing',
+                        'background_processing_state' => 'queued',
+                        'background_processing_progress' => 1,
+                        'instant_publish' => false,
+                        'processing_dispatch_source' => 'story_controller',
                     ]);
                 }
 
                 $storyMedia->status = $isUploadedR2Video ? MediaStatus::PROCESSED : MediaStatus::PROCESSING;
                 $storyMedia->metadata = $metadata;
                 $storyMedia->save();
+
+                if($shouldDispatchR2Video) {
+                    ProcessStoryVideo::dispatch($this->draftStoryFrame)->afterCommit();
+                }
             }
 
             event(new StoryCreatedEvent($this->draftStoryFrame));

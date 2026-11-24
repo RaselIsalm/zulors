@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { publicationManager } from '@/kernel/services/media/publications/index.js';
-import { isPublicationMedia, selectPublicationMedia, releasePublicationSelection } from '@/kernel/services/media/publications/selection.js';
+import { isPublicationMedia, publicationMediaType, selectPublicationMedia, releasePublicationSelection } from '@/kernel/services/media/publications/selection.js';
 import { directVideoUpload } from '@/kernel/services/media/r2-direct-video-upload.js';
 import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 import { useStoriesStore } from '@M/store/stories/stories.store.js';
@@ -222,7 +222,7 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 					}
 				} finally { this.isUploading = false; }
 			}
-			if(mediaFile.type.startsWith('video/')) {
+			if(publicationMediaType(mediaFile) === 'video' || mediaFile?.type?.startsWith('video/')) {
 				this.isUploading = true;
 				let uploadCreated = false;
 				try {
@@ -236,13 +236,23 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 							uploadCreated = true;
 							this.releaseMediaPreview();
 							this.storyMediaObjectUrl = URL.createObjectURL(mediaFile);
-							this.storyMedia = { ...upload, source_url: this.storyMediaObjectUrl, preview_url: this.storyMediaObjectUrl };
+							this.storyMedia = {
+								...upload,
+								source_url: upload.source_url || upload.preview_url || this.storyMediaObjectUrl,
+								preview_url: upload.preview_url || upload.source_url || this.storyMediaObjectUrl,
+								is_local_preview: ! (upload.source_url || upload.preview_url),
+							};
 						},
 					});
 					if(media) {
 						this.releaseMediaPreview();
 						this.storyMediaObjectUrl = URL.createObjectURL(mediaFile);
-						this.storyMedia = { ...media, source_url: this.storyMediaObjectUrl, preview_url: this.storyMediaObjectUrl };
+						this.storyMedia = {
+							...media,
+							source_url: media.source_url || media.preview_url || this.storyMediaObjectUrl,
+							preview_url: media.preview_url || media.source_url || this.storyMediaObjectUrl,
+							is_local_preview: ! (media.source_url || media.preview_url),
+						};
 						if(this.discardUploadedMedia) {
 							this.discardUploadedMedia = false;
 							await this.deleteMedia();

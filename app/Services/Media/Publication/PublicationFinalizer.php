@@ -11,6 +11,7 @@ use App\Enums\User\UserStatus;
 use App\Events\User\Chat\MessageMediaReadyEvent;
 use App\Events\User\Timeline\MediaProcessedEvent;
 use App\Jobs\Media\DeliverPublicationEvent;
+use App\Jobs\User\Story\ProcessStoryVideo;
 use App\Jobs\User\Timeline\ConvertAndCompressPostVideo;
 use App\Actions\Media\DeleteMediaAction;
 use App\Models\Chat;
@@ -32,6 +33,7 @@ use App\Services\Timeline\TopicExtractionService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -106,37 +108,50 @@ class PublicationFinalizer
 
                 foreach ($items as $item) {
                     $output = $outputs[$item->id];
+                    $isVideo = $item->type === 'video';
+                    $needsCanonicalVideo = $isVideo && in_array($publication->kind, ['post', 'story'], true);
                     $media = $entity->media()->create(array_merge(Arr::only($output, [
                         'source_path', 'disk', 'mime', 'extension', 'size',
                         'thumbnail_path', 'thumbnail_disk', 'thumbnail_size', 'lqip_base64',
                     ]), [
                         'type' => $item->type,
+                        // A verified upload is publishable, but a video is not
+                        // playback-ready until the canonical H.264/AAC worker
+                        // has produced its derived MP4.
+                        // The verified source is persisted as a processed media
+                        // row for backwards-compatible feed/story relations;
+                        // playback readiness is carried separately below.
                         'status' => MediaStatus::PROCESSED,
                         'order' => $item->position,
                         'metadata' => $this->mediaMetadata($publication, $item, $output),
                     ]));
 
-                    if ($entity instanceof Post && $item->type === 'video') {
+                    if ($needsCanonicalVideo) {
                         $metadata = $media->metadata ?? [];
                         $hlsEnabled = (bool) config('media.reels_hls.enabled', false);
-                        $metadata['playback_state'] = 'ready';
+                        $metadata['playback_state'] = 'processing';
                         $metadata['processing_state'] = 'queued';
                         $metadata['processing_progress'] = 0;
                         $metadata['background_processing_state'] = 'queued';
                         $metadata['background_processing_progress'] = 0;
                         $metadata['background_processing_updated_at'] = now()->toIso8601String();
                         $metadata['background_processing_dispatched_at'] = now()->toIso8601String();
+                        $metadata['processing_dispatch_source'] = 'publication_finalizer';
                         $metadata['background_processing_attempts'] = 0;
                         $metadata['playback'] = array_merge((array) ($metadata['playback'] ?? []), [
                             'hls' => null,
-                            'hls_state' => $hlsEnabled ? 'queued' : 'skipped',
+                            'hls_state' => $hlsEnabled && $entity instanceof Post ? 'queued' : 'skipped',
                             'renditions' => [],
                         ]);
                         $media->metadata = $metadata;
                         $media->save();
 
-                        DB::afterCommit(fn () => ConvertAndCompressPostVideo::dispatch($entity)
-                            ->onQueue(config('media.queues.video_high')));
+                        if ($entity instanceof Post) {
+                            DB::afterCommit(fn () => ConvertAndCompressPostVideo::dispatch($entity)
+                                ->onQueue(config('media.queues.video_high')));
+                        } elseif ($entity instanceof StoryFrame) {
+                            DB::afterCommit(fn () => ProcessStoryVideo::dispatch($entity));
+                        }
                     }
                 }
 
@@ -174,7 +189,16 @@ class PublicationFinalizer
                             'chat' => url('/messenger/c/'.$entity->chat_uuid),
                             'comment' => $entity->post?->url,
                         },
+                        'playback_state' => $items->contains(fn ($item) => $item->type === 'video')
+                            && in_array($publication->kind, ['post', 'story'], true) ? 'processing' : 'ready',
                     ],
+                ]);
+
+                Log::info('media_publication.domain_created', [
+                    'publication_id' => $publication->id,
+                    'kind' => $publication->kind,
+                    'entity_id' => $entity->id,
+                    'playback_state' => data_get($publication->result, 'playback_state'),
                 ]);
 
                 DeliverPublicationEvent::record($publication, 'domain_created');

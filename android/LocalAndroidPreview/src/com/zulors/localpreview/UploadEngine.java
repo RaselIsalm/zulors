@@ -179,6 +179,7 @@ final class UploadEngine {
             store.part(uid, itemUid, generation, part.getInt("part_number"), part.getString("etag"));
         }
         AtomicLong bytes = new AtomicLong(); AtomicLong lastProgress = new AtomicLong();
+        AtomicBoolean firstByte = new AtomicBoolean();
         long expectedStart = 0;
         for (int i = 0; i < parts.length(); i++) {
             JSONObject part = parts.getJSONObject(i);
@@ -202,8 +203,12 @@ final class UploadEngine {
                             if (count == 0) check(uid, false);
                             if (stopped.get() || !owner.equals(coordinator.account()) || Thread.currentThread().isInterrupted()) throw new IOException("stopped");
                             long loaded = bytes.addAndGet(count), now = android.os.SystemClock.elapsedRealtime(), previous = lastProgress.get();
-                            if (now - previous >= 1000 && lastProgress.compareAndSet(previous, now)) {
-                                store.progress(owner, uid, itemUid, (int) Math.min(99, loaded * 100 / file.length())); changed(uid, false);
+                            int percent = (int) Math.min(99, loaded * 100 / file.length());
+                            if (loaded > 0 && firstByte.compareAndSet(false, true)) {
+                                store.progress(owner, uid, itemUid, Math.max(1, percent));
+                                changed(uid, true);
+                            } else if (now - previous >= 1000 && lastProgress.compareAndSet(previous, now)) {
+                                store.progress(owner, uid, itemUid, percent); changed(uid, false);
                             }
                         } catch (Exception error) { throw new IOException("stopped", error); }
                     });
@@ -224,6 +229,7 @@ final class UploadEngine {
             while (!pool.awaitTermination(1, TimeUnit.SECONDS)) { UploadHttp.cancel(uid); }
         }
         store.progress(owner, uid, itemUid, 100);
+        changed(uid, true);
         return multipart ? store.parts(uid, itemUid, generation) : new JSONArray();
     }
 

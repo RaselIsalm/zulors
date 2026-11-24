@@ -187,6 +187,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
                     'processed_at' => now()->toIso8601String(),
                     'processing_progress' => 100,
                     'processing_state' => 'processed',
+                    'playback_state' => 'ready',
                     'processing_updated_at' => now()->toIso8601String(),
                     'processing_error' => null,
                     'background_processing_state' => 'processed',
@@ -392,6 +393,7 @@ class ConvertAndCompressPostVideo implements ShouldQueue
         }
 
         if($state === 'failed') {
+            $metadata['playback_state'] = 'failed';
             if($this->isInstantR2MediaAwaitingOptimization($postMedia)) {
                 $metadata['processing_error'] = 'Background video optimization failed. Raw playback remains available.';
             }

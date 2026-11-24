@@ -298,28 +298,11 @@ class DirectMediaUploadController extends Controller
                     );
                 }
                 catch (Exception $e) {
-                    if(! $r2DirectUploadService->uploaded($media->source_path, $media->disk)) {
-                        return $this->responseValidationError([
-                            'message' => $e->getMessage(),
-                            'errors' => [
-                                'video' => [
-                                    $e->getMessage()
-                                ]
-                            ]
-                        ]);
-                    }
+                    // R2 can briefly hide a completed multipart object. The
+                    // verification below is the authoritative, retryable
+                    // completion check; a duplicate CompleteMultipart call is
+                    // therefore safe to continue past.
                 }
-            }
-
-            if(! $r2DirectUploadService->uploaded($media->source_path, $media->disk)) {
-                return $this->responseValidationError([
-                    'message' => 'Direct upload file was not found on R2.',
-                    'errors' => [
-                        'video' => [
-                            'Direct upload file was not found on R2.'
-                        ]
-                    ]
-                ]);
             }
 
             try {

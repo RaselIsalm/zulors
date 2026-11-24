@@ -9,7 +9,7 @@ const positiveNumber = (value) => {
 
 export const storyMediaDimensions = (mediaItem = {}, fallbackDimensions = {}) => {
     const metadata = mediaItem?.metadata || {};
-    const dimensions = metadata.dimensions || mediaItem?.dimensions || {};
+    const dimensions = metadata.display_dimensions || metadata.dimensions || mediaItem?.dimensions || {};
     const width = Math.round(positiveNumber(
         dimensions.width || mediaItem?.width || metadata.width || metadata.video_width || fallbackDimensions.width
     ));

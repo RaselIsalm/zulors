@@ -109,14 +109,14 @@ WebP quality 86, and capped to a 2048px long edge in a browser worker when that
 reduces size. Otherwise, the original image is retained. GIF and animated PNG/WebP
 are intentionally rejected from this path.
 
-Videos and documents are unchanged. Video is stored and served from R2 as provided;
-R2 itself does not encode or compress media. Post/story jobs create the app's
-optimized playback MP4 and thumbnail. For eligible pilot accounts, a separate
+Documents remain unchanged. The original video bytes are preserved in R2, while
+post/story jobs create a canonical H.264/AAC playback MP4 and thumbnail before
+playback is marked ready. For eligible pilot accounts, a separate
 Cloudflare Stream import runs from the processed R2 object and switches playback
 to Stream HLS only after the signed webhook confirms `readyToStream`. The original
-R2 playback remains available throughout processing and on any failure. The initial
-R2 video is not guaranteed to support immediate playback on every browser/device
-codec; the poster stays visible until a video frame is decoded.
+R2 source remains available for retry/reprocessing, but it is not exposed as a
+playback-ready URL while canonical processing is pending; the poster stays visible
+until a compatible video frame is available.
 
 The managed Stream pilot is disabled unless all of these are configured:
 

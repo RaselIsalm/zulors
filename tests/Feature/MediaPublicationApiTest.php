@@ -8,6 +8,7 @@ use App\Jobs\Media\CleanupPublication;
 use App\Jobs\Media\FinalizePublication;
 use App\Jobs\Media\ProcessPublicationItem;
 use App\Jobs\User\Timeline\ConvertAndCompressPostVideo;
+use App\Jobs\User\Story\ProcessStoryVideo;
 use App\Models\Chat;
 use App\Models\MediaPublication;
 use App\Models\MediaPublicationItem;
@@ -612,12 +613,15 @@ class MediaPublicationApiTest extends TestCase
 
         $this->assertSame('active', $frame->status->value);
         $this->assertSame('processed', $media->status->value);
-        $this->assertSame('skipped', data_get($media->metadata, 'background_processing_state'));
+        $this->assertNull($media->source_url);
+        $this->assertSame('queued', data_get($media->metadata, 'background_processing_state'));
+        $this->assertSame('processing', data_get($media->metadata, 'playback_state'));
         $this->assertSame('original_direct', data_get($media->metadata, 'processing_mode'));
         $this->assertDatabaseCount('stories', 1);
         $this->assertDatabaseCount('story_frames', 1);
         $this->assertDatabaseCount('media', 1);
         Bus::assertNotDispatched(ProcessPublicationItem::class);
+        Bus::assertDispatched(ProcessStoryVideo::class);
     }
 
     public static function invalidCompletions(): array

@@ -8,9 +8,9 @@ direct-upload hardening work. Production was not contacted.
 | Category | Entry point | Current bytes path | Notes |
 | --- | --- | --- | --- |
 | Post/reel images | `routes/api/user/post_editor.php` → `PostImageController::uploadImage` | Browser multipart → Laravel/PHP upload temp → `ImageUploadService`/GD → configured storage disk | Image conversion and disk write run on the app server. Reel publishing shares post/video media. |
-| Post/reel video | `media/video/direct/create` → `DirectMediaUploadController` or `/api/media-publications` | Client uploads to signed R2 URLs; completion verifies/promotes R2; post/story workers optimize and create a poster. For explicitly allowlisted users only, a separate job asks Cloudflare Stream to copy the final R2 object and swaps playback to HLS after a signed ready webhook. R2 stays canonical and remains the failure fallback. | Stream is disabled by default and requires account/token/webhook settings plus a pilot allowlist. See [background-publications.md](background-publications.md). |
+| Post/reel video | `media/video/direct/create` → `DirectMediaUploadController` or `/api/media-publications` | Client uploads to signed R2 URLs; completion verifies/promotes R2; post/story workers create a canonical H.264/AAC MP4 and poster before playback is marked ready. For explicitly allowlisted users only, a separate job asks Cloudflare Stream to copy the final R2 object and swaps playback to HLS after a signed ready webhook. R2 stays canonical and remains the failure fallback. | Stream is disabled by default and requires account/token/webhook settings plus a pilot allowlist. See [background-publications.md](background-publications.md). |
 | Legacy post video | `media/video/upload` → `PostVideoController` | Multipart through Laravel and the app upload service when direct-only is disabled | Direct-only mode returns 409, but the endpoint remains a server upload path when that flag is false. |
-| Story image/video | `media/upload` → `StoryMediaController::uploadMedia` | Image multipart goes through Laravel, GD and storage. Video is rejected when direct-only is enabled; the dedicated direct-video endpoints PUT/multipart to R2 | Story video processing later uses the VPS story-video job/FFmpeg. |
+| Story image/video | `media/upload` → `StoryMediaController::uploadMedia` | Image multipart goes through Laravel, GD and storage. Video is rejected when direct-only is enabled; the dedicated direct-video endpoints PUT/multipart to R2 | Verified videos enter a queued VPS story-video FFmpeg job; raw source stays hidden from playback until canonical MP4/poster output is ready. |
 | Chat image/audio/document | `chats/{id}/send` and `/audio/{id}/upload` | Multipart through Laravel, then `WithMediaUpload`/audio processing jobs and configured storage | Voice notes also use a two-step API, but the second step sends the full audio body through Laravel. |
 | Chat video | `media/video/direct/*` APIs for video; `/send` remains the generic attachment endpoint | Supported video path uploads to R2, then the chat-video processing job can download and encode on VPS. Generic legacy video is server-uploaded when direct-only is off. | The Android upload queue is a local preview subsystem and is not proof that the production WebView path uses native device encoding. |
 | Profile avatar/cover and onboarding avatar | `account/avatar/update`, `account/cover/update`, `avatar/update` | Multipart through Laravel; image crop/compression and storage happen in PHP/GD | Existing media URL fields remain paths on the configured static disk. |
@@ -22,10 +22,11 @@ Other relevant code: `R2DirectUploadService` signs single PUT and multipart URLs
 but also exposes raw/part application-server proxy methods. The app can retry
 small direct-upload failures through those endpoints when fallback budgets are
 nonzero. `PublicationMediaProcessor` verifies metadata and promotes uploaded
-objects with an R2-side copy. After a post video is published, the queued media
-worker downloads it to temporary local storage for FFmpeg optimization and
-uploads the playback MP4, thumbnail and original archive to R2. The upload
-request itself never carries the video body through Laravel.
+objects with an R2-side copy. After a post/story video is published, the queued
+media worker downloads it to temporary local storage for FFmpeg H.264/AAC
+optimization and uploads the playback MP4 and poster to R2. The original source
+remains available for retry/reprocessing, and the upload request itself never
+carries the video body through Laravel.
 
 ## Architecture gap
 
@@ -43,7 +44,7 @@ temp objects expire.
 | Category | Current client/API path | Server behavior |
 | --- | --- | --- |
 | Post/reel image, video, audio and document | Publication editor/outbox → `/api/media-publications` create/resume/complete | Signed R2 PUT/multipart; verify and server-side promote. Post videos queue FFmpeg MP4 optimization and then optional HLS. |
-| Story image and video | Story editor/outbox → `/api/media-publications` with `kind=story` | Same direct R2 path; no story FFmpeg worker. |
+| Story image and video | Story editor/outbox → `/api/media-publications` with `kind=story` | Same direct R2 path; verified video queues the story FFmpeg worker and remains poster-only until canonical playback is ready. |
 | Chat image, video, audio and document | Chat store/editor → `/api/media-publications` with `kind=chat` | Same direct R2 path; old chat `/send` multipart and `/audio/{id}/upload` are blocked. |
 | Profile avatar, cover and onboarding avatar | Profile/onboarding UI → `/api/media-uploads/create` and `/complete` | Signed R2 single or multipart upload, verified and associated with the user. |
 | Group avatar | Group editor → `/api/media-uploads/create` and `/complete` with group ID | Participant authorization, signed R2 upload, verified and associated with group. |
@@ -61,9 +62,9 @@ The publication outbox stores upload state locally, prepares before sending,
 and uploads with signed R2 PUT or multipart URLs. Parts are retried and their
 ETags are persisted for resume. The API accepts metadata and completion calls,
 checks authorization, declared/actual size and stored content type, then
-promotes objects using R2 server-side copy. The publication completes
-synchronously after this metadata-only promotion; it does not dispatch a VPS
-media-processing job. A publication UUID and per-item generation make retry
+promotes objects using R2 server-side copy. The publication completes after
+verification, then dispatches post/story video processing after commit; raw video
+is not marked playback-ready until that worker finishes. A publication UUID and per-item generation make retry
 idempotent. Profile, cover, group and onboarding avatars use the same signed
 R2 pattern, including multipart for larger images and cached idempotency keys.
 

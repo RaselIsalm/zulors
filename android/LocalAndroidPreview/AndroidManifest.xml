@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 __WEB_MEDIA_PERMISSIONS__
 __LOCATION_PERMISSIONS__
+    <!-- Portrait is the default layout, but it is not required hardware. Keep
+         tablets, desktop and Android XR devices installable. -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
     <supports-screens
         android:anyDensity="true"
         android:largeScreens="true"

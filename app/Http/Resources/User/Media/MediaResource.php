@@ -15,7 +15,9 @@ class MediaResource extends JsonResource
             'id' => $this->id,
             'mediaable_id' => $this->mediaable_id,
             'source_url' => $this->source_url,
-            'playback_ready' => $this->type->isVideo() && filled($this->source_url),
+            'playback_ready' => $this->type->isVideo()
+                && data_get($this->metadata, 'playback_state', 'ready') === 'ready'
+                && filled($this->source_url),
             'playback_mode' => $this->type->isVideo() && data_get($this->metadata, 'provider') === 'r2' ? 'r2_direct' : null,
             'preview_url' => $this->getPreviewUrl(),
             'extension' => $this->extension,
@@ -42,6 +44,12 @@ class MediaResource extends JsonResource
                     'clip_start_seconds',
                     'clip_end_seconds',
                     'dimensions',
+                    'coded_dimensions',
+                    'display_dimensions',
+                    'rotation',
+                    'container',
+                    'video_codec',
+                    'audio_codec',
                     'aspect_ratio',
                     'is_portrait',
                     'provider',

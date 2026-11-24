@@ -159,85 +159,102 @@ class R2DirectUploadService
         $targetPath = $targetPrefix.'/'.hash('sha256', $sourceDisk.'|'.$sourceBucket.'|'.$tempPath).'.'.$extension;
         $targetStorage = Storage::disk($targetDisk);
         $sourceStorage = Storage::disk($sourceDisk);
-        $sourceExists = $sourceStorage->exists($tempPath);
-        $size = null;
         $expectedMime = strtolower(trim(explode(';', $contentType, 2)[0]));
 
         if(! preg_match('/\A[a-z0-9.+-]+\/[a-z0-9.+-]+\z/', $expectedMime)) {
             throw new Exception('Invalid uploaded media content type.');
         }
 
-        if($sourceExists) {
-            try {
-                $head = $this->s3Client($sourceDisk)->headObject([
-                    'Bucket' => $sourceBucket,
-                    'Key' => $tempPath,
+        // Completion is idempotent. A client may retry after the final copy
+        // succeeded but before the response arrived; in that case the temp
+        // object may already be gone and must not be required again.
+        $existingTarget = $this->headObjectWithRetry($targetDisk, $targetBucket, $targetPath, false, 1);
+        if($existingTarget !== null) {
+            $publishedSize = (int) ($existingTarget['size'] ?? 0);
+            $publishedMime = (string) ($existingTarget['mime'] ?? '');
+
+            if($publishedSize > 0 && ($publishedMime === '' || $publishedMime === $expectedMime)) {
+                Log::info('media.r2_object_promotion_reused', [
+                    'source_disk' => $sourceDisk,
+                    'source_path' => $tempPath,
+                    'target_disk' => $targetDisk,
+                    'target_path' => $targetPath,
+                    'size_bytes' => $publishedSize,
                 ]);
-                $size = (int) $head->get('ContentLength');
-                $storedMime = strtolower(trim(explode(';', (string) $head->get('ContentType'), 2)[0]));
-            }
-            catch(\Throwable $exception) {
-                throw new Exception('Uploaded R2 object is missing or unavailable.', previous: $exception);
+
+                return ['disk' => $targetDisk, 'path' => $targetPath, 'size' => $publishedSize];
             }
 
-            if($storedMime !== '' && $storedMime !== $expectedMime) {
-                throw new Exception('Uploaded R2 object content type does not match the authorized upload.');
-            }
+            $targetStorage->delete($targetPath);
         }
 
-        if($size !== null && $size < 1) {
+        $sourceHead = $this->headObjectWithRetry($sourceDisk, $sourceBucket, $tempPath, true);
+        $size = (int) ($sourceHead['size'] ?? 0);
+        $storedMime = (string) ($sourceHead['mime'] ?? '');
+
+        if($size < 1) {
             throw new Exception('Uploaded R2 object is empty.');
         }
 
-        // A repeated completion reuses the same final key and avoids another copy.
-        $targetExists = $targetStorage->exists($targetPath);
+        if($storedMime !== '' && $storedMime !== $expectedMime) {
+            throw new Exception('Uploaded R2 object content type does not match the authorized upload.');
+        }
 
-        if(! $targetExists) {
-            if($size === null) {
-                throw new Exception('Uploaded R2 object is missing or unavailable.');
+        $client = $this->s3Client($targetDisk);
+        $copyOptions = [
+            'Bucket' => $targetBucket,
+            'Key' => $targetPath,
+            'CopySource' => $this->copySource($sourceBucket, $tempPath),
+            'ContentType' => $contentType,
+            'MetadataDirective' => 'REPLACE',
+        ];
+
+        if($cacheControl = config('media.cache.control')) {
+            $copyOptions['CacheControl'] = $cacheControl;
+        }
+
+        $lastCopyError = null;
+        $attempts = max(1, (int) config('media.cloudflare.r2.publish_retry_attempts', 5));
+        for($attempt = 1; $attempt <= $attempts; $attempt++) {
+            try {
+                if($size <= self::MAX_SINGLE_COPY_BYTES) {
+                    $client->copyObject($copyOptions);
+                }
+                else {
+                    $this->multipartCopyObject(
+                        $client,
+                        $sourceBucket,
+                        $tempPath,
+                        $targetBucket,
+                        $targetPath,
+                        $size,
+                        $contentType,
+                        (string) config('media.cache.control')
+                    );
+                }
+                $lastCopyError = null;
+                break;
             }
-
-            $client = $this->s3Client($targetDisk);
-            $copyOptions = [
-                'Bucket' => $targetBucket,
-                'Key' => $targetPath,
-                'CopySource' => $this->copySource($sourceBucket, $tempPath),
-                'ContentType' => $contentType,
-                'MetadataDirective' => 'REPLACE',
-            ];
-
-            if($cacheControl = config('media.cache.control')) {
-                $copyOptions['CacheControl'] = $cacheControl;
-            }
-
-            if($size <= self::MAX_SINGLE_COPY_BYTES) {
-                $client->copyObject($copyOptions);
-            }
-            else {
-                $this->multipartCopyObject(
-                    $client,
-                    $sourceBucket,
-                    $tempPath,
-                    $targetBucket,
-                    $targetPath,
-                    $size,
-                    $contentType,
-                    (string) config('media.cache.control')
-                );
+            catch(\Throwable $exception) {
+                $lastCopyError = $exception;
+                // A successful copy can still return a transient error to a
+                // retried request. Re-check the deterministic target key.
+                $copied = $this->headObjectWithRetry($targetDisk, $targetBucket, $targetPath, false, 1);
+                if($copied !== null && (int) ($copied['size'] ?? 0) === $size) {
+                    $lastCopyError = null;
+                    break;
+                }
+                $this->sleepBeforeRetry($attempt);
             }
         }
 
-        try {
-            $targetHead = $this->s3Client($targetDisk)->headObject([
-                'Bucket' => $targetBucket,
-                'Key' => $targetPath,
-            ]);
-            $publishedSize = (int) $targetHead->get('ContentLength');
-            $publishedMime = strtolower(trim(explode(';', (string) $targetHead->get('ContentType'), 2)[0]));
+        if($lastCopyError !== null) {
+            throw new Exception('R2 final object could not be promoted.', previous: $lastCopyError);
         }
-        catch(\Throwable $exception) {
-            throw new Exception('R2 final object could not be verified after promotion.', previous: $exception);
-        }
+
+        $targetHead = $this->headObjectWithRetry($targetDisk, $targetBucket, $targetPath, true);
+        $publishedSize = (int) ($targetHead['size'] ?? 0);
+        $publishedMime = (string) ($targetHead['mime'] ?? '');
 
         if($publishedSize < 1 || ($size !== null && $publishedSize !== $size) || ($publishedMime !== '' && $publishedMime !== $expectedMime)) {
             $targetStorage->delete($targetPath);
@@ -245,12 +262,23 @@ class R2DirectUploadService
         }
 
         if($deleteSource) {
-            $sourceStorage->delete($tempPath);
+            try {
+                $sourceStorage->delete($tempPath);
+            }
+            catch(\Throwable $exception) {
+                Log::warning('media.r2_temp_cleanup_deferred', [
+                    'source_disk' => $sourceDisk,
+                    'source_path' => $tempPath,
+                    'error_type' => $exception::class,
+                ]);
+            }
         }
 
         Log::info('media.r2_object_promoted', [
             'source_disk' => $sourceDisk,
+            'source_path' => $tempPath,
             'target_disk' => $targetDisk,
+            'target_path' => $targetPath,
             'size_bytes' => $publishedSize,
             'vps_media_body_bytes' => 0,
             'source_retained' => ! $deleteSource,
@@ -518,13 +546,77 @@ class R2DirectUploadService
     public function verifyUploadedObject(string $path, string $disk, int $expectedSize, int $maxBytes): array
     {
         $storage = Storage::disk($disk);
-        $size = (int) $storage->size($path);
-        $mime = strtolower(trim(explode(';', (string) $storage->mimeType($path), 2)[0]));
+        $attempts = max(1, (int) config('media.cloudflare.r2.verify_retry_attempts', 5));
+        $size = 0;
+        $mime = '';
+        $lastError = null;
+
+        for($attempt = 1; $attempt <= $attempts; $attempt++) {
+            try {
+                $size = (int) $storage->size($path);
+                $mime = strtolower(trim(explode(';', (string) $storage->mimeType($path), 2)[0]));
+                if($size > 0) break;
+            }
+            catch(\Throwable $exception) {
+                $lastError = $exception;
+            }
+            $this->sleepBeforeRetry($attempt, 'verify');
+        }
+
+        if($size < 1 && $lastError) {
+            throw new Exception('Uploaded R2 object is missing or unavailable.', previous: $lastError);
+        }
+
         if($size < 1 || $size > $maxBytes || ($expectedSize > 0 && $size !== $expectedSize)) {
             throw new Exception('Uploaded object size does not match the declared size or exceeds the upload limit.');
         }
 
         return ['size' => $size, 'mime' => $mime];
+    }
+
+    /** @return array{size:int,mime:string}|null */
+    private function headObjectWithRetry(string $disk, string $bucket, string $path, bool $required, ?int $attemptLimit = null): ?array
+    {
+        $attempts = max(1, $attemptLimit ?: (int) config('media.cloudflare.r2.publish_retry_attempts', 5));
+        $lastError = null;
+
+        for($attempt = 1; $attempt <= $attempts; $attempt++) {
+            try {
+                $head = $this->s3Client($disk)->headObject([
+                    'Bucket' => $bucket,
+                    'Key' => $path,
+                ]);
+
+                return [
+                    'size' => (int) $head->get('ContentLength'),
+                    'mime' => strtolower(trim(explode(';', (string) $head->get('ContentType'), 2)[0])),
+                ];
+            }
+            catch(\Throwable $exception) {
+                $lastError = $exception;
+                $this->sleepBeforeRetry($attempt);
+            }
+        }
+
+        if($required) {
+            throw new Exception('Uploaded R2 object is missing or unavailable.', previous: $lastError);
+        }
+
+        return null;
+    }
+
+    private function sleepBeforeRetry(int $attempt, string $purpose = 'publish'): void
+    {
+        $base = max(0, (int) config(
+            $purpose === 'verify'
+                ? 'media.cloudflare.r2.verify_retry_delay_ms'
+                : 'media.cloudflare.r2.publish_retry_delay_ms',
+            250
+        ));
+
+        if($base > 0 && $attempt > 0) {
+            usleep(min(5000, $base * (2 ** min(4, $attempt - 1))) * 1000);
+        }
     }
 
     public function configureTempLifecycle(int $days = 3, bool $apply = false): array

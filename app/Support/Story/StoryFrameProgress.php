@@ -24,8 +24,10 @@ class StoryFrameProgress
         $uploadProgress = max(0, min(100, (int) data_get($metadata, 'upload_progress', 100)));
         $processingProgress = max(1, min(100, (int) data_get($metadata, 'processing_progress', 1)));
         $processingState = data_get($metadata, 'processing_state', 'queued');
+        $playbackState = data_get($metadata, 'playback_state');
         $isFailed = $media?->status?->isFailed() || $processingState === 'failed';
-        $isProcessed = $media?->status?->isProcessed() || $processingState === 'processed';
+        $isProcessed = $playbackState === 'ready'
+            || (blank($playbackState) && ($media?->status?->isProcessed() || $processingState === 'processed'));
         $stage = self::stage($uploadProgress, $processingState, $isFailed, $isProcessed);
         $overallProgress = $uploadProgress < 100 ? $uploadProgress : $processingProgress;
         $displayProgress = max(1, min(100, $overallProgress));

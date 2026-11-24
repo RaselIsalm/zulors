@@ -107,6 +107,13 @@ class PublicationMediaProcessor
             $metadata['is_portrait'] = $width < $height;
         }
 
+        if ($item->type === 'video') {
+            $metadata['playback_state'] = 'processing';
+            foreach (['container_mime', 'video_codec', 'audio_codec', 'rotation', 'coded_width', 'coded_height', 'display_width', 'display_height'] as $key) {
+                if (array_key_exists($key, (array) $item->metadata)) $metadata[$key] = data_get($item->metadata, $key);
+            }
+        }
+
         $output = [
             'source_path' => $output['path'],
             'disk' => $output['disk'],
