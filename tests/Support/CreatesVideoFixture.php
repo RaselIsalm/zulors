@@ -51,7 +51,9 @@ trait CreatesVideoFixture
                 hash_file('sha256', Storage::disk('r2_final')->path($originalStorage['path']))
             );
         }
-        Storage::disk('r2_temp')->assertMissing($original['source_path']);
+        // Remote originals are retained in the archive so a failed encode can
+        // be retried without losing the camera recording.
+        Storage::disk('r2_temp')->assertExists($original['source_path']);
         $this->assertSame($original['size'], data_get($media->metadata, 'original_size'));
         $this->assertSame(Storage::disk('r2_final')->size($media->source_path), data_get($media->metadata, 'optimized_size'));
     }
