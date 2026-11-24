@@ -176,7 +176,7 @@ class StoryVideoPipelineTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.metadata.upload_state', 'uploaded')
             ->assertJsonPath('data.metadata.processing_state', 'queued');
-        $this->assertNull($completed->json('data.source_url'));
+        $this->assertNotNull($completed->json('data.source_url'));
         Queue::assertNothingPushed();
         $this->postJson('/api/story/editor/create', ['content' => 'Ready to process'])
             ->assertOk()
@@ -196,7 +196,7 @@ class StoryVideoPipelineTest extends TestCase
             ->assertJsonPath('data.0.relations.frames.0.media.status', MediaStatus::PROCESSED->value)
             ->json('data.0.relations.frames.0');
 
-        $this->assertNull($viewerPayload['media']['source_url']);
+        $this->assertNotNull($viewerPayload['media']['source_url']);
         $this->assertSame('queued', data_get($viewerPayload, 'media.metadata.background_processing_state'));
         $this->assertFalse(data_get($viewerPayload, 'media.metadata.instant_publish'));
     }

@@ -207,6 +207,7 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 				postId: postData.id,
 				mediaId: playbackState.mediaId || postData.relations?.media?.[0]?.id || null,
 				handoffToken: playbackState.handoffToken || '',
+				currentTime: Number(playbackState.currentTime || 0),
 				startedAt: Number(playbackState.startedAt || Date.now()),
 				wasPlaying: Boolean(playbackState.wasPlaying),
 			};

@@ -11,13 +11,16 @@ class MediaResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $sourceUrl = $this->source_url;
+
         $mediaItem = [
             'id' => $this->id,
             'mediaable_id' => $this->mediaable_id,
-            'source_url' => $this->source_url,
+            'source_url' => $sourceUrl,
             'playback_ready' => $this->type->isVideo()
-                && data_get($this->metadata, 'playback_state', 'ready') === 'ready'
-                && filled($this->source_url),
+                && filled($sourceUrl)
+                && (data_get($this->metadata, 'playback_state', 'ready') === 'ready'
+                    || $this->hasCanonicalDirectPlayback()),
             'playback_mode' => $this->type->isVideo() && data_get($this->metadata, 'provider') === 'r2' ? 'r2_direct' : null,
             'preview_url' => $this->getPreviewUrl(),
             'extension' => $this->extension,

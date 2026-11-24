@@ -613,7 +613,8 @@ class MediaPublicationApiTest extends TestCase
 
         $this->assertSame('active', $frame->status->value);
         $this->assertSame('processed', $media->status->value);
-        $this->assertNull($media->source_url);
+        $this->assertNotNull($media->source_url);
+        $this->assertTrue($media->hasCanonicalDirectPlayback());
         $this->assertSame('queued', data_get($media->metadata, 'background_processing_state'));
         $this->assertSame('processing', data_get($media->metadata, 'playback_state'));
         $this->assertSame('original_direct', data_get($media->metadata, 'processing_mode'));

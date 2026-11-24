@@ -36,7 +36,15 @@ test('mobile reels retain a decoded nearby frame and key players by media identi
     const item = await readVue('../../resources/js/spa/apps/mobile/components/reels/ReelItem.vue');
 
     assert.match(player.script.content, /shouldWarmPlayback\.value\s*\|\|\s*state\.hasVisualFrame/);
+    assert.match(player.script.content, /watch\(\s*\(\) => \[sourceUrl\.value, playbackSource\.value\.transport, directPlaybackSource\.value\?\.url/);
     assert.match(item.template.content, /<ReelVideoPlayer[\s\S]*?v-bind:key="mediaItem\.id"/);
+});
+
+test('desktop reels reattach a source when the warmed seed receives its canonical URL', async () => {
+    const player = await readVue('../../resources/js/spa/apps/desktop/components/reels/ReelVideoPlayer.vue');
+
+    assert.match(player.script.content, /watch\(\s*\(\) => \[sourceUrl\.value, playbackSource\.value\.transport, directPlaybackSource\.value\?\.url/);
+    assert.match(player.script.content, /configurePlaybackSource\(\);[\s\S]*?syncPlaybackWindow\(\);[\s\S]*?playVideo\(\);/);
 });
 
 test('mobile feed remounts a player when the media identity changes', async () => {

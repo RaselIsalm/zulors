@@ -229,6 +229,8 @@
 				return playbackSource.value.url || '';
 			});
 
+			const directPlaybackSource = computed(() => getDirectPlaybackFallback(props.mediaItem));
+
 			const posterUrl = computed(() => {
 				return props.mediaItem?.thumbnail_url || props.mediaItem?.lqip_base64 || '';
 			});
@@ -334,7 +336,7 @@
 			);
 
 			const hlsStartPosition = () => {
-				const currentTime = Number(videoPlayerRef.value?.currentTime || 0);
+				const currentTime = Number(videoPlayerRef.value?.currentTime || state.resumePosition || 0);
 
 				return Number.isFinite(currentTime) && currentTime > 0
 					? currentTime
@@ -1108,13 +1110,17 @@
 
 				const configurePlaybackSource = () => {
 				const videoElement = videoPlayerRef.value;
+				const handoffResumePosition = Number(props.handoff?.currentTime || 0);
 				const source = state.forceMp4Fallback
-					? (getDirectPlaybackFallback(props.mediaItem) || playbackSource.value)
+					? (directPlaybackSource.value || playbackSource.value)
 					: playbackSource.value;
 
 				destroyHlsInstance();
 				state.nativeVideoUrl = '';
 				resetPlaybackState(false);
+				if(handoffResumePosition > 0) {
+					state.resumePosition = handoffResumePosition;
+				}
 				state.playbackActivatedAt = Number(props.handoff?.startedAt || Date.now());
 
 				if(! videoElement || ! source.url || ! shouldAttachPlaybackSource.value) {
@@ -1319,6 +1325,30 @@
 						releasePlaybackSource();
 					}
 				});
+
+				watch(
+					() => [sourceUrl.value, playbackSource.value.transport, directPlaybackSource.value?.url || ''],
+					(nextSource, previousSource) => {
+						if(! previousSource || nextSource.every((value, index) => value === previousSource[index])) {
+							return;
+						}
+
+						if(shouldAttachPlaybackSource.value) {
+							nextTick(() => {
+								configurePlaybackSource();
+								syncPlaybackWindow();
+
+								if(props.active) {
+									playVideo();
+								}
+							});
+						}
+						else {
+							releasePlaybackSource();
+						}
+					},
+					{ flush: 'post' }
+				);
 
 				watch(() => props.active, (isActive) => {
 				if(isActive) {
