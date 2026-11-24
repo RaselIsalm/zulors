@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { applyReelPreloadPolicy, applyReelStartupQualityPolicy, getPreferredReelLevelIndex, getReelPreloadPolicy, getRequiredStartupBufferSeconds, getSustainableReelLevelIndex } from '../../resources/js/spa/kernel/services/media/reel-preload-policy.js';
 
 test('startup buffer target is capped to the remaining duration of short videos', () => {
-	assert.equal(getRequiredStartupBufferSeconds(3, 0), 1);
-	assert.equal(getRequiredStartupBufferSeconds(60, 2), 1);
-	assert.equal(getRequiredStartupBufferSeconds(60, 58), 1);
-	assert.equal(getRequiredStartupBufferSeconds(Number.POSITIVE_INFINITY, 0), 1);
+	assert.equal(getRequiredStartupBufferSeconds(3, 0), 0.25);
+	assert.equal(getRequiredStartupBufferSeconds(60, 2), 0.25);
+	assert.equal(getRequiredStartupBufferSeconds(60, 58), 0.25);
+	assert.equal(getRequiredStartupBufferSeconds(Number.POSITIVE_INFINITY, 0), 0.25);
 });
 
 test('the next reel preloads one network-appropriate segment then keeps its buffer bounded', () => {
@@ -24,8 +24,8 @@ test('the next reel preloads one network-appropriate segment then keeps its buff
         startLevel: -1,
         abrEwmaDefaultEstimate: 5_000_000,
         preferredShortEdge: 720,
-		startupBufferSeconds: 1,
-		startupHdWaitMs: 2_500,
+		startupBufferSeconds: 0.25,
+		startupHdWaitMs: 1_000,
         nextBufferSeconds: 2,
         stallIndicatorDelayMs: 2_000,
         autoLevelCapping: -1,

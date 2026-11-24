@@ -10,8 +10,10 @@ const MIN_STARTUP_ESTIMATE = 500_000;
 // Start as soon as the first decodable frame is buffered.  A long startup
 // buffer makes a healthy clip look stuck on Android/WebView; rebuffer recovery
 // remains responsible for filling more media after playback begins.
-export const REEL_STARTUP_BUFFER_SECONDS = 1;
-export const REEL_STARTUP_HD_WAIT_MS = 2_500;
+// Start on the first decodable frame.  A small guard avoids a play/pause
+// loop on slow connections without making every reel wait seconds for HD.
+export const REEL_STARTUP_BUFFER_SECONDS = 0.25;
+export const REEL_STARTUP_HD_WAIT_MS = 1_000;
 export const REEL_NEXT_BUFFER_SECONDS = 2;
 export const REEL_STALL_INDICATOR_DELAY_MS = 2_000;
 

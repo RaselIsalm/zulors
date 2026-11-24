@@ -232,7 +232,7 @@
 			const directPlaybackSource = computed(() => getDirectPlaybackFallback(props.mediaItem));
 
 			const posterUrl = computed(() => {
-				return props.mediaItem?.thumbnail_url || props.mediaItem?.lqip_base64 || '';
+				return props.mediaItem?.thumbnail_url || props.mediaItem?.poster_url || props.mediaItem?.lqip_base64 || '';
 			});
 
 			const canRenderVideo = computed(() => {
@@ -454,7 +454,7 @@
 			const updatePlaybackReadiness = () => {
 				const readyState = Number(videoPlayerRef.value?.readyState || 0);
 				const hasBufferedAhead = bufferedAheadSeconds() >= requiredStartupBufferSeconds();
-				const hasDirectFallbackFrame = state.startupQualityFallbackApplied && ! hlsInstance && readyState >= 2;
+				const hasDirectFallbackFrame = ! hlsInstance && readyState >= 2;
 				const isReady = transferredMediaReady || hasBufferedAhead || hasDirectFallbackFrame;
 
 				state.isReadyForPlayback = isReady;
@@ -1165,6 +1165,8 @@
 
 						if(controller.attachTransferredMedia(transferredHandoff, videoElement)) {
 							transferredMediaReady = true;
+							state.playRequested = Boolean(props.active);
+							state.isReadyForPlayback = true;
 							nextTick(() => {
 								if(videoPlayerRef.value?.readyState >= 1) {
 									handleLoadedMetadata();
@@ -1172,11 +1174,13 @@
 								if(videoPlayerRef.value?.readyState >= 2) {
 									handleLoadedData();
 								}
+								if(props.active && ! props.blocked) {
+									playVideo();
+								}
 							});
 
 							return;
 						}
-
 						transferredHlsListeners.forEach(({ event, listener }) => instance.off?.(event, listener));
 						transferredHlsListeners = [];
 						playbackController = null;

@@ -166,6 +166,7 @@
 	import { colibriEventBus } from '@/kernel/events/bus/index.js';
 	import { applyOptimisticReaction } from '@/kernel/services/reactions/optimistic.js';
 	import { MediaStatusUtils } from '@/kernel/enums/post/media.status.js';
+	import { canPlayVideoImmediately } from '@/kernel/services/media/immediate-video-playback.js';
 	import { sendFeedFeedbackEvent } from '@/kernel/services/timeline-feedback/index.js';
 	import { useMenu } from '@/kernel/vue/composables/menu/index.js';
 	import { useExploreReelsStore } from '@M/store/explore/reels.store.js';
@@ -263,18 +264,7 @@
 				return postData.value.content || '';
 			});
 
-			const canPlayImmediately = computed(() => {
-				const item = mediaItem.value;
-
-				if(! item?.id || MediaStatusUtils.isFailed(item.status)) {
-					return false;
-				}
-
-				return MediaStatusUtils.isProcessed(item.status)
-					|| (['r2_temp', 'r2_direct'].includes(item.metadata?.provider)
-						&& item.metadata?.upload_state === 'uploaded'
-						&& Boolean(item.preview_url));
-			});
+			const canPlayImmediately = computed(() => canPlayVideoImmediately(mediaItem.value));
 
 			const isPlaybackBlocked = computed(() => {
 				return Boolean(postData.value.meta?.is_sensitive) && ! state.sensitiveRevealed;

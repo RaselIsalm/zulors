@@ -9,7 +9,7 @@ const disposeHandoff = (handoff) => {
 	handoff.controller.discardHandoff?.(handoff);
 };
 
-export function retainReelPlaybackHandoff(mediaId, handoff, ttlMs = 12000) {
+export function retainReelPlaybackHandoff(mediaId, handoff, ttlMs = 30000) {
 	if(! mediaId || ! handoff?.controller) {
 		return '';
 	}
@@ -25,7 +25,7 @@ export function retainReelPlaybackHandoff(mediaId, handoff, ttlMs = 12000) {
 
 			handoffs.delete(token);
 			disposeHandoff(handoff);
-		}, Math.max(1000, Number(ttlMs) || 12000))
+		}, Math.max(1000, Number(ttlMs) || 30000))
 	};
 
 	handoffs.set(token, entry);

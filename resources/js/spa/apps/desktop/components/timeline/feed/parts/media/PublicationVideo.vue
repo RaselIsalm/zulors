@@ -36,6 +36,7 @@
 	import { useTimelineStore } from '@D/store/timeline/timeline.store.js';
 	import { useAuthStore } from '@D/store/auth/auth.store.js';
 	import { MediaStatusUtils } from '@/kernel/enums/post/media.status.js';
+	import { canPlayVideoImmediately } from '@/kernel/services/media/immediate-video-playback.js';
 	import { colibriEventBus } from '@/kernel/events/bus/index.js';
 	import { isVideoPortrait, normalizeVideoAspectRatio } from '@/kernel/services/media/video-metadata.js';
 	import BRD from '@/kernel/websockets/brd/index.js';
@@ -61,19 +62,8 @@
 			const mediaItem = computed(() => {
 				return props.postMedia[0] || {};
 			});
-			const posterUrl = computed(() => mediaItem.value.thumbnail_url || mediaItem.value.lqip_base64 || '');
-			const canPlayImmediately = computed(() => {
-				const item = mediaItem.value;
-
-				if(! item?.id || MediaStatusUtils.isFailed(item.status)) {
-					return false;
-				}
-
-				return MediaStatusUtils.isProcessed(item.status)
-					|| (['r2', 'r2_temp', 'r2_direct'].includes(item.metadata?.provider)
-						&& item.metadata?.upload_state === 'uploaded'
-						&& Boolean(item.preview_url));
-			});
+			const posterUrl = computed(() => mediaItem.value.thumbnail_url || mediaItem.value.poster_url || mediaItem.value.lqip_base64 || '');
+			const canPlayImmediately = computed(() => canPlayVideoImmediately(mediaItem.value));
 
 			const replaceCurrentMedia = (mediaData) => {
 				if(! mediaData?.id || mediaData.mediaable_id != mediaItem.value.mediaable_id || mediaData.id != mediaItem.value.id) {

@@ -131,22 +131,27 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 				const entryPost = this.posts.find((postData) => postData?.hash_id === nextSeedHashId) || this.posts[0];
 				this.entryPostHashId = '';
 
-				const warmedPosts = await this.prefetchFirstPage(nextSeedHashId, {
+				// Keep the primed feed item mounted while the first page warms in the
+				// background. Waiting here replaced the handoff source before the
+				// Reels player could attach it, leaving the poster frozen on Android.
+				this.prefetchFirstPage(nextSeedHashId, {
 					refreshReason: 'post_entry',
 					force: true
-				}).catch(() => []);
+				}).then((warmedPosts) => {
+					if(! warmedPosts.length) {
+						this.filter.page = 0;
+						return;
+					}
 
-				if(warmedPosts.length) {
 					const refreshedEntryPost = warmedPosts.find((postData) => postData?.id == entryPost?.id) || entryPost;
 					this.posts = [
 						refreshedEntryPost,
 						...warmedPosts.filter((postData) => postData?.id != refreshedEntryPost?.id)
 					].slice(0, reelsCacheLimit);
 					this.persistFirstPage();
-				}
-				else {
+				}).catch(() => {
 					this.filter.page = 0;
-				}
+				});
 
 				return;
 			}
