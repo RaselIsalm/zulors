@@ -711,6 +711,7 @@ class StoryMediaController extends Controller
             'source_url' => $playbackUrl,
             'preview_url' => $playbackUrl,
             'thumbnail_url' => filled($storyMedia->thumbnail_path) ? storage_url($storyMedia->thumbnail_path, $storyMedia->thumbnail_disk) : null,
+            'poster_url' => filled($storyMedia->thumbnail_path) ? storage_url($storyMedia->thumbnail_path, $storyMedia->thumbnail_disk) : null,
             'duration' => parse_duration($clipData['duration_seconds']),
             'duration_seconds' => $clipData['duration_seconds'],
             'clip_start_seconds' => $clipData['start_seconds'],

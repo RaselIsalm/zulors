@@ -24,7 +24,10 @@ class MediaResource extends JsonResource
             'type' => $this->type->value,
             'size' => $this->size,
             'status' => $this->status->value,
+            // One canonical poster field keeps feed, profile and Reels from
+            // choosing different fallbacks for the same media record.
             'thumbnail_url' => $this->thumbnail_url,
+            'poster_url' => $this->thumbnail_url ?: $this->lqip_base64,
             'thumbnail_size' => $this->thumbnail_size,
             'lqip_base64' => $this->lqip_base64,
             'metadata' => $this->getMetadata($this->metadata, $request)
