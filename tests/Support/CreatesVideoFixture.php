@@ -17,12 +17,14 @@ trait CreatesVideoFixture
         config(['filesystems.image_encoder' => 'webp']);
         $disk = Storage::disk('r2_temp');
         $path = 'tmp/direct/videos/worker-test.avi';
-        $disk->makeDirectory(dirname($path));
+        $fixturePath = tempnam(sys_get_temp_dir(), 'zulors-video-').'.avi';
         (new Process([$binary, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
-            '-t', '3', '-c:v', 'rawvideo', '-pix_fmt', 'yuv420p', $disk->path($path)]))->mustRun();
-        if(! is_file($disk->path($path))) {
+            '-t', '3', '-c:v', 'rawvideo', '-pix_fmt', 'yuv420p', $fixturePath]))->mustRun();
+        if(! is_file($fixturePath)) {
             $this->markTestSkipped('FFmpeg could not create the local video fixture.');
         }
+        $disk->put($path, file_get_contents($fixturePath));
+        @unlink($fixturePath);
         return [
             'source_path' => $path, 'type' => \App\Enums\Media\MediaType::VIDEO,
             'status' => \App\Enums\Media\MediaStatus::PROCESSING, 'disk' => 'r2_temp', 'thumbnail_disk' => 'r2_final',
