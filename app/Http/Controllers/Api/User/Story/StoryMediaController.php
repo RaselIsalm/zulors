@@ -742,6 +742,10 @@ class StoryMediaController extends Controller
 
     private function storyMediaCanPreviewOriginal(Media $storyMedia): bool
     {
+        if($storyMedia->hasCanonicalDirectPlayback()) {
+            return true;
+        }
+
         return data_get($storyMedia->metadata, 'processing_state') === 'processed'
             && ! in_array(data_get($storyMedia->metadata, 'provider'), ['r2_temp', 'r2_direct'], true);
     }
