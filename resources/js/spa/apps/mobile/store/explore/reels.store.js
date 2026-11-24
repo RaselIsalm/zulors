@@ -11,6 +11,28 @@ const reelsCacheLimit = 20;
 const reelsPerPage = 30;
 const warmRequests = new Map();
 
+const isRetryableReelsError = (error) => {
+	const status = Number(error?.response?.status || 0);
+	return ! status || [408, 425, 429, 500, 502, 503, 504].includes(status);
+};
+
+const requestReelsWithRetry = async (request, attempts = 2) => {
+	let lastError;
+
+	for(let attempt = 0; attempt <= attempts; attempt++) {
+		try {
+			return await request();
+		}
+		catch(error) {
+			lastError = error;
+			if(! isRetryableReelsError(error) || attempt === attempts) throw error;
+			await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+		}
+	}
+
+	throw lastError;
+};
+
 const normalizeSeedHash = function(seedHashId = '') {
 	return String(seedHashId || '').trim().slice(0, 80);
 };
@@ -209,9 +231,10 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 
 			return await this.load().then((response) => {
 				const posts = prioritizeIncomingPosts(response.data.data || [], this.filter.seed_hash_id);
+				const visiblePosts = posts.length || ! this.posts.length ? posts : this.posts;
 
 				this.pageLoadError = false;
-				this.posts = posts;
+				this.posts = visiblePosts;
 				this.applyFeedMeta(response?.data?.meta);
 				prefetchReelsPlaybackWindow(this.posts, 0);
 				this.persistFirstPage();
@@ -224,12 +247,12 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 		loadNextPage: async function() {
 			try {
 				return await requestNextReelsPage(this.filter.page, (nextPage) => {
-					return colibriAPI().userTimeline().params({
+					return requestReelsWithRetry(() => colibriAPI().userTimeline().params({
 						filter: {
 							...this.requestFilter(),
 							page: nextPage
 						}
-					}).getFrom('feed');
+					}).getFrom('feed'));
 				}, (nextPage) => {
 					this.filter.page = nextPage;
 					this.pageLoadError = false;
@@ -241,9 +264,9 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 			}
 		},
 		load: async function() {
-			return await colibriAPI().userTimeline().params({
+			return await requestReelsWithRetry(() => colibriAPI().userTimeline().params({
 				filter: this.requestFilter()
-			}).getFrom('feed');
+			}).getFrom('feed'));
 		},
 		prefetchFirstPage: async function(seedHashId = '', options = {}) {
 			const normalizedSeedHashId = normalizeSeedHash(seedHashId);
@@ -266,9 +289,9 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 				return warmRequests.get(cacheKey);
 			}
 
-			const warmPromise = colibriAPI().userTimeline().params({
+			const warmPromise = requestReelsWithRetry(() => colibriAPI().userTimeline().params({
 				filter: buildWarmRequestFilter(normalizedSeedHashId, options.refreshReason || 'warm')
-			}).getFrom('feed').then((response) => {
+			}).getFrom('feed')).then((response) => {
 				const posts = prioritizeIncomingPosts(response.data.data || [], normalizedSeedHashId);
 
 				if(this.filter.seed_hash_id === normalizedSeedHashId) {
@@ -277,8 +300,8 @@ const useExploreReelsStore = defineStore('mobile_explore_reels_store', {
 				writeCache(cacheKey, posts.slice(0, reelsCacheLimit));
 				prefetchReelsPlaybackWindow(posts, 0);
 
-				if(this.filter.seed_hash_id === normalizedSeedHashId && ! this.posts.length) {
-					this.posts = posts;
+				if(this.filter.seed_hash_id === normalizedSeedHashId && (posts.length || ! this.posts.length)) {
+					this.posts = posts.length ? posts : this.posts;
 				}
 
 				return posts;

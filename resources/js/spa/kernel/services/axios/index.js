@@ -1,6 +1,5 @@
 import Axios from 'axios';
 import { normalizeRateLimitError } from '@/kernel/services/errors/index.js';
-import { evictCurrentFeedViewerSnapshots } from '@/kernel/services/cache/feed-cache.js';
 import { reportApiDuration } from '@/kernel/services/performance/index.js';
 
 
@@ -81,9 +80,9 @@ const refreshCsrfCookie = (() => {
 const normalizeExpiredSessionError = (error) => {
     error = normalizeRateLimitError(error);
 
-    if([401, 403, 419].includes(Number(error?.response?.status || 0))) {
-        evictCurrentFeedViewerSnapshots().catch(() => {});
-    }
+    // Keep the active in-memory/cached feed visible on an expired session.
+    // Views can recover the CSRF cookie or ask the user to sign in without
+    // replacing a currently playing Reel with an empty failure screen.
 
     if(error?.response?.status === 401 && error.response.data) {
         error.response.data.message = 'Your session expired. Please refresh the page and sign in again.';

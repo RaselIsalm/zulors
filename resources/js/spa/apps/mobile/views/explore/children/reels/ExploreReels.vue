@@ -278,7 +278,9 @@
 					await reelsStore.initialLoad(props.hash_id, route.query.ad_id);
 				}
 				catch(error) {
-					state.initialLoadFailed = true;
+					// A cached/seeded post remains playable while an expired session or
+					// transient feed request recovers in the background.
+					state.initialLoadFailed = ! reelsStore.posts.length;
 				}
 				finally {
 					state.isLoading = false;

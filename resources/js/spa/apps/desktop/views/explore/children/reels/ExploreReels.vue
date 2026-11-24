@@ -366,7 +366,7 @@
 				try {
 					await reelsStore.initialLoad(props.hash_id, route.query.ad_id);
 				} catch(error) {
-					state.initialLoadFailed = true;
+					state.initialLoadFailed = ! reelsStore.posts.length;
 				} finally {
 					state.isLoading = false;
 
