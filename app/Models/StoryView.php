@@ -17,7 +17,7 @@ class StoryView extends Model
 
     public function scopeWithUser($query)
     {
-        return $query->with(['user:id,avatar,first_name,last_name,username,verified']);
+        return $query->with(['user:id,avatar,avatar_disk,first_name,last_name,username,verified']);
     }
 
     public function story()

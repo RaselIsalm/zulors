@@ -21,7 +21,7 @@ class Story extends Model
     public function scopeWithRelations($query)
     {
         return $query->with([
-            'user:id,avatar,first_name,last_name,username,verified',
+            'user:id,avatar,avatar_disk,first_name,last_name,username,verified',
             'frames' => function($withQuery) {
                 $withQuery->relevantStories();
             }

@@ -446,7 +446,10 @@ class StoryController extends Controller
     private function storyViewerRelations(): array
     {
         return [
-            'user:id,avatar,first_name,last_name,username,verified',
+            // avatar_disk is required by User::avatar_url. Without it a
+            // custom avatar stored outside the default disk is resolved to
+            // the wrong URL in the story viewer header.
+            'user:id,avatar,avatar_disk,first_name,last_name,username,verified',
             'frames' => function($withQuery) {
                 $this->applyVisibleStoryFrameQuery($withQuery);
             },
@@ -459,7 +462,9 @@ class StoryController extends Controller
     private function storyFeedRelations(): array
     {
         return [
-            'user:id,avatar,first_name,last_name',
+            // Keep the feed avatar URL on the same storage disk as the
+            // profile/avatar settings used by the user resource.
+            'user:id,avatar,avatar_disk,first_name,last_name',
             'frames' => function($withQuery) {
                 $this->applyVisibleStoryFrameQuery($withQuery);
             },

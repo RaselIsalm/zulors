@@ -99,6 +99,40 @@ class StoryProcessingVisibilityTest extends TestCase
         $this->assertSame(StoryStatus::ACTIVE->value, $viewerPayload['status']);
     }
 
+    public function test_story_feed_and_viewer_resolve_avatar_from_the_users_avatar_disk(): void
+    {
+        $owner = $this->createUser('story-avatar-owner');
+        $avatarPath = 'uploads/users/avatars/story-avatar.webp';
+
+        $owner->update([
+            'avatar' => $avatarPath,
+            'avatar_disk' => 'local',
+        ]);
+
+        $story = $this->createStory($owner);
+        $this->createStoryFrame($story, [
+            'status' => StoryStatus::ACTIVE,
+            'type' => StoryType::IMAGE,
+        ]);
+
+        $expectedAvatarUrl = storage_url($avatarPath, 'local');
+
+        $feedPayload = $this->actingAs($owner)
+            ->withoutMiddleware()
+            ->getJson('/api/stories/feed')
+            ->assertOk()
+            ->json('data.0.relations.user');
+
+        $viewerPayload = $this->actingAs($owner)
+            ->withoutMiddleware()
+            ->getJson("/api/stories/stories/{$story->story_uuid}")
+            ->assertOk()
+            ->json('data.0.relations.user');
+
+        $this->assertSame($expectedAvatarUrl, $feedPayload['avatar_url']);
+        $this->assertSame($expectedAvatarUrl, $viewerPayload['avatar_url']);
+    }
+
     public function test_expired_story_is_hidden_from_feed_viewer_and_view_endpoints(): void
     {
         $owner = $this->createUser('story-expired-owner');
