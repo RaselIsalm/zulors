@@ -7,8 +7,11 @@ const DEFAULT_ABR_ESTIMATES = {
 };
 
 const MIN_STARTUP_ESTIMATE = 500_000;
-export const REEL_STARTUP_BUFFER_SECONDS = 5;
-export const REEL_STARTUP_HD_WAIT_MS = 10_000;
+// Start as soon as the first decodable frame is buffered.  A long startup
+// buffer makes a healthy clip look stuck on Android/WebView; rebuffer recovery
+// remains responsible for filling more media after playback begins.
+export const REEL_STARTUP_BUFFER_SECONDS = 1;
+export const REEL_STARTUP_HD_WAIT_MS = 2_500;
 export const REEL_NEXT_BUFFER_SECONDS = 2;
 export const REEL_STALL_INDICATOR_DELAY_MS = 2_000;
 

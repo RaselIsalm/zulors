@@ -2,11 +2,12 @@
     <div
         v-bind:style="frameStyle"
     class="w-full bg-fill-pr overflow-hidden relative">
-        <img v-if="mediaItem.thumbnail_url" v-bind:src="mediaItem.thumbnail_url" class="size-full object-cover" alt="Video thumbnail">
-        <div v-else class="size-full flex-center bg-fill-tr text-lab-sc">
-            <span class="size-icon-large">
-                <SvgIcon name="video-recorder" type="line"></SvgIcon>
-            </span>
+        <img v-if="posterUrl" v-bind:src="posterUrl" class="size-full object-cover" alt="Video thumbnail">
+        <div v-else class="size-full flex-center bg-gradient-to-br from-slate-700 via-slate-800 to-slate-950 text-white/80">
+            <div class="flex flex-col items-center gap-2">
+                <span class="size-icon-large"><SvgIcon name="video-recorder" type="line"></SvgIcon></span>
+                <span class="text-cap-s">{{ progressLabel }}</span>
+            </div>
         </div>
         <div class="from-black/70 to-transparent bg-gradient-to-t absolute bottom-0 left-0 right-0 px-4 pb-4 pt-8">
             <div class="flex items-center justify-between gap-3">
@@ -78,6 +79,10 @@
             const progressWidth = computed(() => {
                 return `${Math.max(3, progress.value)}%`;
             });
+            const posterUrl = computed(() => {
+                const item = mediaItem.value || {};
+                return item.thumbnail_url || item.poster_url || item.lqip_base64 || '';
+            });
 
             const userId = authStore.userData.id;
             let refreshIntervalId = null;
@@ -131,6 +136,7 @@
 
             return {
                 mediaItem: mediaItem,
+                posterUrl: posterUrl,
                 progress: progress,
                 progressLabel: progressLabel,
                 progressWidth: progressWidth,
