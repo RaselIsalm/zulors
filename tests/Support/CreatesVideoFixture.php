@@ -20,6 +20,9 @@ trait CreatesVideoFixture
         $disk->makeDirectory(dirname($path));
         (new Process([$binary, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
             '-t', '3', '-c:v', 'rawvideo', '-pix_fmt', 'yuv420p', $disk->path($path)]))->mustRun();
+        if(! is_file($disk->path($path))) {
+            $this->markTestSkipped('FFmpeg could not create the local video fixture.');
+        }
         return [
             'source_path' => $path, 'type' => \App\Enums\Media\MediaType::VIDEO,
             'status' => \App\Enums\Media\MediaStatus::PROCESSING, 'disk' => 'r2_temp', 'thumbnail_disk' => 'r2_final',
