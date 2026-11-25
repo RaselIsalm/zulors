@@ -9,7 +9,7 @@ const navigationTimeoutMs = 850;
 const mediaCacheMaxBytes = 80 * 1024 * 1024;
 const mediaCacheMaxEntries = 160;
 const mediaCacheMaxSingleBytes = 25 * 1024 * 1024;
-const trustedMediaOrigin = 'https://media.zulors.com';
+let trustedMediaOrigins = new Set([self.location.origin]);
 let reelCachePriorityUrls = new Map();
 let hlsDescendantPriorityUrls = new Map();
 
@@ -174,7 +174,7 @@ const normalizeCachePriorityUrl = (value) => {
     try {
         const url = new URL(String(value || ''), self.location.origin);
         if(! ['http:', 'https:'].includes(url.protocol)
-            || (url.origin !== self.location.origin && url.origin !== trustedMediaOrigin)
+            || !trustedMediaOrigins.has(url.origin)
             || url.username || url.password) {
             return null;
         }
@@ -591,6 +591,23 @@ self.addEventListener('message', (event) => {
     }
 
     if(messageType === 'ZULORS_REELS_CACHE_WINDOW') {
+        const configuredOrigins = Array.isArray(event.data?.trustedMediaOrigins)
+            ? event.data.trustedMediaOrigins
+            : [];
+        const nextTrustedMediaOrigins = new Set([self.location.origin]);
+        configuredOrigins.forEach((value) => {
+            try {
+                const origin = new URL(String(value || ''), self.location.origin);
+                if(['http:', 'https:'].includes(origin.protocol) && !origin.username && !origin.password) {
+                    nextTrustedMediaOrigins.add(origin.origin);
+                }
+            }
+            catch(error) {
+                // Ignore malformed origins supplied by a stale client build.
+            }
+        });
+        trustedMediaOrigins = nextTrustedMediaOrigins;
+
         const nextPriorities = new Map();
         (Array.isArray(event.data?.current) ? event.data.current : []).forEach((value) => {
             const url = normalizeCachePriorityUrl(value);
@@ -617,7 +634,7 @@ self.addEventListener('message', (event) => {
                 event.data?.current,
                 event.data?.next,
                 event.data?.preferredShortEdge,
-                event.data?.currentBufferSeconds,
+                event.data?.prefetchCurrentBufferSeconds || event.data?.currentBufferSeconds,
                 event.data?.nextBufferSeconds,
             );
 

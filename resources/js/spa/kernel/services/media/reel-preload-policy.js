@@ -13,6 +13,7 @@ const MIN_STARTUP_ESTIMATE = 500_000;
 // Start on the first decodable frame.  A small guard avoids a play/pause
 // loop on slow connections without making every reel wait seconds for HD.
 export const REEL_STARTUP_BUFFER_SECONDS = 0.25;
+export const REEL_PREFETCH_BUFFER_SECONDS = 5;
 export const REEL_STARTUP_HD_WAIT_MS = 1_000;
 export const REEL_NEXT_BUFFER_SECONDS = 2;
 export const REEL_STALL_INDICATOR_DELAY_MS = 2_000;

@@ -98,7 +98,7 @@
 	import { createAdaptiveVideoPlaybackController } from '@/kernel/services/media/adaptive-video/playback.js';
 	import { getRequiredStartupBufferSeconds, getSustainableReelLevelIndex, REEL_STARTUP_BUFFER_SECONDS, REEL_STARTUP_HD_WAIT_MS, REEL_STALL_INDICATOR_DELAY_MS } from '@/kernel/services/media/reel-preload-policy.js';
 	import { queueMetric } from '@/kernel/services/performance/index.js';
-	import { retainReelPlaybackHandoff } from '@/kernel/services/media/reel-playback-handoff.js';
+	import { normalizeReelPlaybackState, retainReelPlaybackHandoff } from '@/kernel/services/media/reel-playback-handoff.js';
 	import { colibriEventBus } from '@/kernel/events/bus/index.js';
 	import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 	import { buildVideoPresentationMetadata, videoFrameAspectStyle } from '@/kernel/services/media/video-metadata.js';
@@ -1050,12 +1050,12 @@
 				handleVideoSurfaceClick: () => {
 					if(props.surfaceClickAction === 'emit') {
 						const wasPlaying = Boolean(state.isPlaying && !videoPlayerRef.value?.paused);
-						const playbackState = {
+						const playbackState = normalizeReelPlaybackState({
 							mediaId: props.mediaId,
 							currentTime: Number(videoPlayerRef.value?.currentTime || 0),
 							wasPlaying,
 							startedAt: Date.now(),
-						};
+						}, props.mediaId);
 
 						if(playbackSource.value.transport === 'hls' && playbackController?.getHlsInstance()) {
 							if(wasPlaying) {

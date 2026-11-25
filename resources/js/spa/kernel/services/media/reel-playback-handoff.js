@@ -1,6 +1,27 @@
 const handoffs = new Map();
 let handoffSequence = 0;
 
+/**
+ * Keep the feed-to-Reels playback envelope identical on desktop and mobile.
+ * Playback position is client state; it must remain finite and non-negative
+ * even when a browser reports an invalid value during source replacement.
+ */
+export function normalizeReelPlaybackState(playbackState = {}, fallbackMediaId = null) {
+	const rawCurrentTime = Number(playbackState?.currentTime || 0);
+	const rawStartedAt = Number(playbackState?.startedAt || 0);
+	const currentTime = Number.isFinite(rawCurrentTime)
+		? Math.max(0, Math.round(rawCurrentTime * 1000) / 1000)
+		: 0;
+
+	return {
+		mediaId: playbackState?.mediaId || fallbackMediaId || null,
+		handoffToken: String(playbackState?.handoffToken || ''),
+		currentTime,
+		startedAt: Number.isFinite(rawStartedAt) && rawStartedAt > 0 ? rawStartedAt : Date.now(),
+		wasPlaying: Boolean(playbackState?.wasPlaying),
+	};
+}
+
 const disposeHandoff = (handoff) => {
 	if(! handoff?.controller) {
 		return;

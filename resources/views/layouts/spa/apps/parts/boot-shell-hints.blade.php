@@ -20,6 +20,19 @@
     $runtimeReverb = config('realtime.reverb', []);
     $runtimeReverbScheme = $runtimeReverb['scheme'] ?: (request()->isSecure() ? 'https' : 'http');
     $runtimeReverbPort = $runtimeReverb['port'] ?: ($runtimeReverbScheme === 'https' ? 443 : 80);
+    $bootMediaOrigins = [];
+    $bootMediaDisk = (string) config('media.cloudflare.r2.final_disk', 'r2_final');
+    $bootMediaUrl = config("filesystems.disks.{$bootMediaDisk}.url");
+    if (is_string($bootMediaUrl) && trim($bootMediaUrl) !== '') {
+        $bootMediaParts = parse_url($bootMediaUrl);
+        if (is_array($bootMediaParts) && !empty($bootMediaParts['scheme']) && !empty($bootMediaParts['host'])) {
+            $bootMediaOrigin = strtolower($bootMediaParts['scheme'].'://'.$bootMediaParts['host']);
+            if (!empty($bootMediaParts['port'])) {
+                $bootMediaOrigin .= ':'.$bootMediaParts['port'];
+            }
+            $bootMediaOrigins[] = $bootMediaOrigin;
+        }
+    }
 @endphp
 
 <link rel="preload" href="{{ $logotypeUrl }}" as="image" fetchpriority="high">
@@ -74,6 +87,7 @@
         bootState.sharedFeedCacheKey = sharedFeedCacheKey;
         bootState.sharedFeedCacheTtl = sharedFeedCacheTtl;
         bootState.sharedFeedCacheMaxAge = sharedFeedCacheMaxAge;
+        bootState.mediaOrigins = @json($bootMediaOrigins);
         startupState.variant = variant;
         startupState.cacheHit = false;
 

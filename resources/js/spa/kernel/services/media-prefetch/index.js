@@ -2,6 +2,7 @@ import { buildAdaptiveVideoSource } from '@/kernel/services/media/adaptive-video
 import { getNetworkProfileSnapshot, isSlowNetworkProfile } from '@/kernel/services/network/index.js';
 import {
 	getReelPlaybackStartupPolicy,
+	REEL_PREFETCH_BUFFER_SECONDS,
 	REEL_NEXT_BUFFER_SECONDS,
 	REEL_STARTUP_BUFFER_SECONDS,
 } from '@/kernel/services/media/reel-preload-policy.js';
@@ -14,6 +15,26 @@ let prefetchHandle = null;
 
 function canPrefetch() {
     return typeof window !== 'undefined' && typeof document !== 'undefined';
+}
+
+function getTrustedMediaOrigins() {
+	if(! canPrefetch()) {
+		return [];
+	}
+
+	const configuredOrigins = Array.isArray(window.__zulorsBoot?.mediaOrigins)
+		? window.__zulorsBoot.mediaOrigins
+		: [];
+
+	return Array.from(new Set(configuredOrigins.map((origin) => {
+		try {
+			const parsed = new URL(String(origin || ''), window.location.origin);
+			return ['http:', 'https:'].includes(parsed.protocol) ? parsed.origin : '';
+		}
+		catch(error) {
+			return '';
+		}
+	}).filter(Boolean)));
 }
 
 function prefetchImage(url) {
@@ -129,13 +150,21 @@ function publishPlaybackCacheWindow(current = [], next = [], networkProfile = {}
         return;
     }
 
+	const slowNetwork = isSlowNetworkProfile(networkProfile);
+
     const message = {
         type: 'ZULORS_REELS_CACHE_WINDOW',
         current,
         next,
+		trustedMediaOrigins: getTrustedMediaOrigins(),
         preferredShortEdge: getReelPlaybackStartupPolicy(networkProfile).preferredShortEdge,
+		// Keep player startup at first decodable frame; let the worker warm a
+		// slightly larger window so navigation does not wait on the next segment.
         currentBufferSeconds: REEL_STARTUP_BUFFER_SECONDS,
-        nextBufferSeconds: REEL_NEXT_BUFFER_SECONDS,
+		prefetchCurrentBufferSeconds: slowNetwork
+			? Math.min(REEL_PREFETCH_BUFFER_SECONDS, REEL_NEXT_BUFFER_SECONDS)
+			: REEL_PREFETCH_BUFFER_SECONDS,
+		nextBufferSeconds: slowNetwork ? 1 : REEL_NEXT_BUFFER_SECONDS,
         prefetch: !networkProfile.offline && !networkProfile.saveData
     };
     const worker = serviceWorker.controller;

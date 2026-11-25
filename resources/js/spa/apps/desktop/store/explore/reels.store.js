@@ -4,6 +4,7 @@ import { readCache, writeCache } from '@/kernel/services/cache/index.js';
 import { defaultFeedMeta, extractFeedMeta, mergeProtectedTail } from '@/kernel/services/feed-session/index.js';
 import { prioritizeReelsByRecentSignals, recordReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 import { prefetchReelsPlaybackWindow } from '@/kernel/services/media-prefetch/index.js';
+import { normalizeReelPlaybackState } from '@/kernel/services/media/reel-playback-handoff.js';
 import { requestNextReelsPage } from '@/kernel/services/feed-session/reels-pagination.js';
 import { useAuthStore } from '@D/store/auth/auth.store.js';
 
@@ -199,12 +200,10 @@ const useExploreReelsStore = defineStore('desktop_explore_reels_store', {
 			this.reset(seedHashId, false);
 			this.posts = [postData];
 			this.entryPostHashId = seedHashId;
+			const mediaId = playbackState?.mediaId || postData.relations?.media?.[0]?.id || null;
 			this.playbackHandoff = {
 				postId: postData.id,
-				mediaId: playbackState.mediaId || postData.relations?.media?.[0]?.id || null,
-				handoffToken: playbackState.handoffToken || '',
-				startedAt: Number(playbackState.startedAt || Date.now()),
-				wasPlaying: Boolean(playbackState.wasPlaying),
+				...normalizeReelPlaybackState(playbackState, mediaId),
 			};
 			prefetchReelsPlaybackWindow(this.posts, 0);
 
