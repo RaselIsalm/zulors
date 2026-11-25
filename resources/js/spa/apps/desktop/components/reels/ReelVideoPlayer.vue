@@ -194,7 +194,11 @@
 				retryCount: 0,
 				resumePosition: 0,
 				lastReportedRendition: '',
-				forceMp4Fallback: false
+				forceMp4Fallback: false,
+				// Android WebView blocks autoplay when a remembered unmuted preference
+				// is restored. Keep the current reel muted after that rejection until
+				// the user explicitly toggles sound.
+				autoplayMuted: false
 			});
 
 			let hlsInstance = null;
@@ -284,7 +288,7 @@
 			});
 
 			const setMuted = () => {
-				state.isMuted = localStorage.getItem('videoPlayerMuted') !== '0';
+				state.isMuted = state.autoplayMuted || localStorage.getItem('videoPlayerMuted') !== '0';
 
 				if(videoPlayerRef.value) {
 					videoPlayerRef.value.muted = state.isMuted;
@@ -893,6 +897,17 @@
 						if(error?.name === 'AbortError') {
 							return;
 						}
+
+						// A saved unmuted preference cannot satisfy mobile autoplay policy.
+						// Retry the same ready frame muted; the user can unmute with the
+						// sound button, which clears this one-session fallback.
+						if(error?.name === 'NotAllowedError' && ! state.autoplayMuted && videoPlayerRef.value) {
+							state.autoplayMuted = true;
+							state.isMuted = true;
+							videoPlayerRef.value.muted = true;
+							playVideo();
+							return;
+						}
 					state.isPlaying = false;
 					state.isBuffering = false;
 						state.showBufferIndicator = false;
@@ -994,6 +1009,7 @@
 
 			const toggleMute = () => {
 				state.isMuted = ! state.isMuted;
+				state.autoplayMuted = false;
 
 				if(videoPlayerRef.value) {
 					videoPlayerRef.value.muted = state.isMuted;
