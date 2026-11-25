@@ -1237,6 +1237,14 @@
 						}
 
 						instance.loadSource(source.url);
+						// autoStartLoad is disabled so that adjacent reels can be warmed
+						// without competing for bandwidth. The active reel must explicitly
+						// start the manifest request here. Waiting for MANIFEST_PARSED to
+						// call startLoad creates a deadlock: MANIFEST_PARSED cannot arrive
+						// until loading has started, leaving the poster frozen on Android.
+						if(shouldWarmPlayback.value) {
+							instance.startLoad(hlsStartPosition());
+						}
 					});
 					instance.attachMedia(videoElement);
 
