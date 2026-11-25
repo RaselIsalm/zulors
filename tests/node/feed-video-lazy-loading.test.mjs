@@ -19,7 +19,7 @@ for(const platform of Object.values(platforms)) {
         assert.match(publication.template.content, /v-bind:loading="isPriority \? 'eager' : 'lazy'"/);
         assert.match(publication.template.content, /v-bind:fetchpriority="isPriority \? 'high' : 'auto'"/);
         assert.match(publication.template.content, /v-bind:thumbnailUrl="posterUrl"/);
-        assert.match(publication.script.content, /thumbnail_url \|\| mediaItem\.value\.lqip_base64/);
+        assert.match(publication.script.content, /thumbnail_url \|\| (?:mediaItem\.value\.poster_url \|\| )?mediaItem\.value\.lqip_base64/);
         assert.match(publication.template.content, /v-if="isNearViewport"/);
         assert.match(publication.script.content, /rootMargin: '1200px 0px'/);
         assert.match(player.template.content, /preload="metadata"/);

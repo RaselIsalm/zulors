@@ -66,7 +66,16 @@ function createWorkerHarness() {
     async function updateWindow(current = [], next = [], prefetch = true, preferredShortEdge = 720, currentBufferSeconds = 5, nextBufferSeconds = 2) {
         let completion = Promise.resolve();
         listeners.get('message')({
-            data: { type: 'ZULORS_REELS_CACHE_WINDOW', current, next, prefetch, preferredShortEdge, currentBufferSeconds, nextBufferSeconds },
+            data: {
+                type: 'ZULORS_REELS_CACHE_WINDOW',
+                current,
+                next,
+                trustedMediaOrigins: ['https://media.zulors.com'],
+                prefetch,
+                preferredShortEdge,
+                currentBufferSeconds,
+                nextBufferSeconds,
+            },
             waitUntil(value) { completion = value; },
         });
         await completion;
