@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
     buildAdaptiveVideoSource,
@@ -45,4 +46,18 @@ test('missing or failed HLS metadata resolves directly to the original MP4', () 
     assert.equal(buildAdaptiveVideoSource(media).url, media.source_url);
     assert.equal(buildAdaptiveVideoSource(media).transport, 'direct');
     assert.equal(getDirectPlaybackFallback(media).url, media.source_url);
+});
+
+test('active Reels starts HLS loading when media attaches', async () => {
+    const source = await readFile(new URL(
+        '../../resources/js/spa/apps/mobile/components/reels/ReelVideoPlayer.vue',
+        import.meta.url,
+    ), 'utf8');
+    const mediaAttachedBlock = source.match(
+        /instance\.on\(Hls\.Events\.MEDIA_ATTACHED, \(\) => \{[\s\S]*?instance\.attachMedia\(videoElement\);/
+    )?.[0] || '';
+
+    assert.match(mediaAttachedBlock, /instance\.loadSource\(source\.url\)/);
+    assert.match(mediaAttachedBlock, /shouldWarmPlayback\.value/);
+    assert.match(mediaAttachedBlock, /instance\.startLoad\(hlsStartPosition\(\)\)/);
 });
