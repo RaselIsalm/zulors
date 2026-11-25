@@ -452,8 +452,11 @@
 			const updatePlaybackReadiness = () => {
 				const readyState = Number(videoPlayerRef.value?.readyState || 0);
 				const hasBufferedAhead = bufferedAheadSeconds() >= requiredStartupBufferSeconds();
-				const hasDirectFallbackFrame = ! hlsInstance && readyState >= 2;
-				const isReady = transferredMediaReady || hasBufferedAhead || hasDirectFallbackFrame;
+				// Android WebView can expose the first decoded HLS frame before its
+				// buffered range reports the full startup target. Treat that frame as
+				// playable so the active reel does not remain frozen on its poster.
+				const hasDecodableFrame = readyState >= 2;
+				const isReady = transferredMediaReady || hasBufferedAhead || hasDecodableFrame;
 
 				state.isReadyForPlayback = isReady;
 

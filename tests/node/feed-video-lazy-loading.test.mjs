@@ -85,3 +85,13 @@ for(const platform of Object.values(platforms)) {
         assert.match(store, /playbackHandoff/);
     });
 }
+
+for(const platform of Object.values(platforms)) {
+	 test(`${platform} starts an active Reel when WebView exposes its first decoded frame`, async () => {
+		const playerPath = `../../resources/js/spa/apps/${platform}/components/reels/ReelVideoPlayer.vue`;
+		const player = (await readFile(new URL(playerPath, import.meta.url))).toString();
+
+		assert.match(player, /const hasDecodableFrame = readyState >= 2/);
+		assert.match(player, /const isReady = transferredMediaReady \|\| hasBufferedAhead \|\| hasDecodableFrame/);
+	});
+}
