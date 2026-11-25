@@ -421,6 +421,12 @@
 					state.startupQualityFallbackApplied = true;
 					if(hlsInstance) {
 						chooseSustainableStartupLevel();
+						// Some Android WebViews can attach an HLS MediaSource and show
+						// its poster without ever buffering the first fragment. Keep the
+						// active reel moving by falling back to the canonical direct file.
+						if(Number(videoPlayerRef.value?.readyState || 0) < 2 && bufferedAheadSeconds() <= 0 && getDirectPlaybackFallback(props.mediaItem)?.url) {
+							applyFallbackSource();
+						}
 					}
 					else if(Number(videoPlayerRef.value?.readyState || 0) >= 2) {
 						state.isReadyForPlayback = true;

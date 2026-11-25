@@ -93,5 +93,6 @@ for(const platform of Object.values(platforms)) {
 
 		assert.match(player, /const hasDecodableFrame = readyState >= 2/);
 		assert.match(player, /const isReady = transferredMediaReady \|\| hasBufferedAhead \|\| hasDecodableFrame/);
+		assert.match(player, /readyState \|\| 0\) < 2 && bufferedAheadSeconds\(\) <= 0 && getDirectPlaybackFallback\(props\.mediaItem\)\?\.url/);
 	});
 }
