@@ -1,3 +1,5 @@
+import { normalizeReelResumePosition } from './reel-resume-state.js';
+
 const handoffs = new Map();
 let handoffSequence = 0;
 
@@ -10,7 +12,7 @@ export function normalizeReelPlaybackState(playbackState = {}, fallbackMediaId =
 	const rawCurrentTime = Number(playbackState?.currentTime || 0);
 	const rawStartedAt = Number(playbackState?.startedAt || 0);
 	const currentTime = Number.isFinite(rawCurrentTime)
-		? Math.max(0, Math.round(rawCurrentTime * 1000) / 1000)
+		? normalizeReelResumePosition(rawCurrentTime)
 		: 0;
 
 	return {

@@ -6,6 +6,11 @@ import {
 	retainReelPlaybackHandoff,
 	takeReelPlaybackHandoff,
 } from '../../resources/js/spa/kernel/services/media/reel-playback-handoff.js';
+import {
+	clearAllReelResumePositions,
+	getReelResumePosition,
+	rememberReelResumePosition,
+} from '../../resources/js/spa/kernel/services/media/reel-resume-state.js';
 
 const events = {
 	MEDIA_ATTACHED: 'mediaAttached',
@@ -154,4 +159,23 @@ test('playback handoff tokens are single-use and validate the media id', () => {
 	assert.equal(takeReelPlaybackHandoff(token, 7), null);
 	assert.equal(takeReelPlaybackHandoff(token, 42), handoff);
 	assert.equal(takeReelPlaybackHandoff(token, 42), null);
+});
+
+test('feed handoff only resumes after the thirty-second threshold', async () => {
+	const { normalizeReelPlaybackState } = await import('../../resources/js/spa/kernel/services/media/reel-playback-handoff.js');
+
+	assert.equal(normalizeReelPlaybackState({ currentTime: 29.999 }).currentTime, 0);
+	assert.equal(normalizeReelPlaybackState({ currentTime: 30 }).currentTime, 30);
+	assert.equal(normalizeReelPlaybackState({ currentTime: 42.125 }).currentTime, 42.125);
+});
+
+test('reel resume state keeps the furthest watched position for reverse navigation', () => {
+	clearAllReelResumePositions();
+	assert.equal(getReelResumePosition('media-1'), 0);
+	assert.equal(rememberReelResumePosition('media-1', 12), 0);
+	assert.equal(rememberReelResumePosition('media-1', 30), 30);
+	assert.equal(rememberReelResumePosition('media-1', 35.5), 35.5);
+	assert.equal(rememberReelResumePosition('media-1', 31), 35.5);
+	assert.equal(getReelResumePosition('media-1'), 35.5);
+	clearAllReelResumePositions();
 });

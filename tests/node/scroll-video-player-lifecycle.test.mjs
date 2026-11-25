@@ -47,6 +47,19 @@ test('desktop reels reattach a source when the warmed seed receives its canonica
     assert.match(player.script.content, /configurePlaybackSource\(\);[\s\S]*?syncPlaybackWindow\(\);[\s\S]*?playVideo\(\);/);
 });
 
+for(const platform of Object.values({ mobile: 'mobile', desktop: 'desktop' })) {
+    test(`${platform} reels use a direct handoff fallback and restore lifecycle resume state`, async () => {
+        const player = await readVue(`../../resources/js/spa/apps/${platform}/components/reels/ReelVideoPlayer.vue`);
+
+        assert.match(player.script.content, /hasTransferredHandoff = Boolean\(props\.handoff\?\.handoffToken\)/);
+        assert.match(player.script.content, /state\.forceMp4Fallback = true/);
+        assert.match(player.script.content, /rememberReelResumePosition/);
+        assert.match(player.script.content, /normalizeReelResumePosition/);
+        assert.match(player.script.content, /zulors:app-resume/);
+        assert.match(player.script.content, /applyRememberedResumePosition\(\{ resetBelowThreshold: true \}\)/);
+    });
+}
+
 test('mobile feed remounts a player when the media identity changes', async () => {
     const publication = await readVue('../../resources/js/spa/apps/mobile/components/timeline/feed/parts/media/PublicationVideo.vue');
 

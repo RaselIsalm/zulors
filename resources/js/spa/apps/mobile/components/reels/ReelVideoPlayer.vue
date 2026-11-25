@@ -104,6 +104,7 @@
 	import { buildReelInteractionSignal } from '@/kernel/services/feed-session/reels-session-signals.js';
 	import { getNetworkProfileSnapshot, isSlowNetworkProfile, subscribeNetworkProfile } from '@/kernel/services/network/index.js';
 	import { createReelPlaybackGestureController } from '@/kernel/services/media/reel-playback-gestures.js';
+	import { getReelResumePosition, normalizeReelResumePosition, rememberReelResumePosition } from '@/kernel/services/media/reel-resume-state.js';
 	import { queueMetric } from '@/kernel/services/performance/index.js';
 
 	import PrimaryIconButton from '@M/components/inter-ui/buttons/PrimaryIconButton.vue';
@@ -193,6 +194,8 @@
 				resumePosition: 0,
 				lastReportedRendition: '',
 				forceMp4Fallback: false,
+				lastResumePersistedAt: 0,
+				lifecycleSuspended: false,
 				// Android WebView blocks autoplay when a remembered unmuted preference
 				// is restored. Keep the current reel muted after that rejection until
 				// the user explicitly toggles sound.
@@ -211,6 +214,7 @@
 			let transferredMediaReady = false;
 			let sponsoredThreeSecondView = false;
 			let sponsoredCompletedView = false;
+			let wasPreviouslyActive = false;
 
 			const recordSponsoredEvent = (eventType, payload = {}) => {
 				if(! props.sponsoredAdId) {
@@ -303,6 +307,55 @@
 				const mediaDuration = Number(props.mediaItem.metadata?.duration?.seconds || props.mediaItem.metadata?.duration_seconds || 0);
 
 				return Number.isFinite(mediaDuration) && mediaDuration > 0 ? mediaDuration : 0;
+			};
+
+			const hasPlaybackHandoff = () => Boolean(props.handoff && (props.handoff.mediaId || props.handoff.handoffToken));
+
+			const resumePositionForCurrentMedia = () => {
+				if(hasPlaybackHandoff()) {
+					return normalizeReelResumePosition(props.handoff.currentTime);
+				}
+
+				return getReelResumePosition(props.mediaItem?.id);
+			};
+
+			const persistResumePosition = () => {
+				const currentTime = Number(videoPlayerRef.value?.currentTime || state.playbackTime || 0);
+
+				if(currentTime < 30 || ! props.mediaItem?.id) {
+					return 0;
+				}
+
+				const rememberedPosition = rememberReelResumePosition(props.mediaItem.id, currentTime);
+				state.lastResumePersistedAt = Date.now();
+
+				return rememberedPosition;
+			};
+
+			const applyRememberedResumePosition = ({ resetBelowThreshold = false } = {}) => {
+				const videoElement = videoPlayerRef.value;
+				const resumePosition = resumePositionForCurrentMedia();
+
+				state.resumePosition = resumePosition;
+
+				if(! videoElement) {
+					return resumePosition;
+				}
+
+				try {
+					if(resumePosition >= 30) {
+						const duration = videoDurationSeconds();
+						videoElement.currentTime = duration > 0
+							? Math.min(resumePosition, Math.max(0, duration - 0.1))
+							: resumePosition;
+					}
+					else if(resetBelowThreshold && Number(videoElement.currentTime || 0) < 30) {
+						videoElement.currentTime = 0;
+					}
+				}
+				catch(error) {}
+
+				return resumePosition;
 			};
 
 			const bufferedAheadSeconds = () => {
@@ -497,7 +550,7 @@
 				}
 			};
 
-				const syncProgress = () => {
+			const syncProgress = () => {
 				const videoElement = videoPlayerRef.value;
 
 				if(! videoElement) {
@@ -508,6 +561,9 @@
 
 				state.durationSeconds = videoDurationSeconds();
 				state.playbackTime = currentTime;
+				if(currentTime >= 30 && Date.now() - state.lastResumePersistedAt >= 1000) {
+					persistResumePosition();
+				}
 				syncBuffered();
 				if(props.sponsoredAdId && props.active && currentTime >= 3 && ! sponsoredThreeSecondView) {
 					sponsoredThreeSecondView = true;
@@ -892,6 +948,7 @@
 
 			const pauseVideo = (options = {}) => {
 				clearStartupBufferTimeout();
+				persistResumePosition();
 				if(videoPlayerRef.value) {
 					videoPlayerRef.value.pause();
 				}
@@ -1107,19 +1164,25 @@
 				}
 			};
 
-				const configurePlaybackSource = () => {
+			const configurePlaybackSource = () => {
 				const videoElement = videoPlayerRef.value;
-				const handoffResumePosition = Number(props.handoff?.currentTime || 0);
-				const source = state.forceMp4Fallback
-					? (directPlaybackSource.value || playbackSource.value)
-					: playbackSource.value;
+				const handoffResumePosition = resumePositionForCurrentMedia();
+				const hasTransferredHandoff = Boolean(props.handoff?.handoffToken);
 
 				destroyHlsInstance();
 				state.nativeVideoUrl = '';
 				resetPlaybackState(false);
-				if(handoffResumePosition > 0) {
-					state.resumePosition = handoffResumePosition;
+				// Android WebView can accept the transferred MediaSource while never
+				// decoding its first frame. Use the canonical MP4 for a feed entry so
+				// the first Reel has a reliable native startup path.
+				if(hasTransferredHandoff && directPlaybackSource.value?.url) {
+					state.forceMp4Fallback = true;
 				}
+				const source = state.forceMp4Fallback
+					? (directPlaybackSource.value || playbackSource.value)
+					: playbackSource.value;
+
+				state.resumePosition = handoffResumePosition;
 				state.playbackActivatedAt = Number(props.handoff?.startedAt || Date.now());
 
 				if(! videoElement || ! source.url || ! shouldAttachPlaybackSource.value) {
@@ -1314,12 +1377,61 @@
 					warmNativePlayback();
 				};
 
-				const releasePlaybackSource = () => {
-					pauseVideo();
-					destroyHlsInstance();
-					state.nativeVideoUrl = '';
-					resetPlaybackState(false);
-				};
+			const suspendPlaybackForLifecycle = () => {
+				persistResumePosition();
+				state.lifecycleSuspended = true;
+				pauseVideo();
+				hlsInstance?.stopLoad?.();
+			};
+
+			const resumePlaybackAfterLifecycle = () => {
+				if(! state.lifecycleSuspended) {
+					return;
+				}
+
+				state.lifecycleSuspended = false;
+				if(! props.active || props.blocked || state.manualPaused) {
+					return;
+				}
+
+				state.showRetry = false;
+				state.playRequested = true;
+				applyRememberedResumePosition();
+				syncPlaybackWindow();
+
+				nextTick(() => {
+					if(! videoPlayerRef.value) {
+						return;
+					}
+
+					if(! playbackController && ! state.nativeVideoUrl && ! videoPlayerRef.value.currentSrc) {
+						configurePlaybackSource();
+					}
+
+					playVideo();
+				});
+			};
+
+			const handleVisibilityChange = () => {
+				if(document.visibilityState === 'hidden') {
+					suspendPlaybackForLifecycle();
+				}
+				else {
+					resumePlaybackAfterLifecycle();
+				}
+			};
+
+			const handlePageHide = () => suspendPlaybackForLifecycle();
+			const handlePageShow = () => resumePlaybackAfterLifecycle();
+			const handleAppResume = () => resumePlaybackAfterLifecycle();
+
+			const releasePlaybackSource = () => {
+				persistResumePosition();
+				pauseVideo();
+				destroyHlsInstance();
+				state.nativeVideoUrl = '';
+				resetPlaybackState(false);
+			};
 
 				watch(shouldAttachPlaybackSource, (shouldAttach) => {
 					if(shouldAttach) {
@@ -1363,9 +1475,14 @@
 
 				watch(() => props.active, (isActive) => {
 				if(isActive) {
+					const shouldRestorePosition = wasPreviouslyActive;
+					wasPreviouslyActive = true;
 					state.manualPaused = false;
 					state.showRetry = false;
 					state.playRequested = true;
+					if(shouldRestorePosition) {
+						applyRememberedResumePosition({ resetBelowThreshold: true });
+					}
 					syncPlaybackWindow();
 
 					nextTick(() => {
@@ -1373,6 +1490,9 @@
 					});
 				}
 				else {
+					if(wasPreviouslyActive) {
+						persistResumePosition();
+					}
 					pauseVideo({
 						emitInteraction: true
 					});
@@ -1421,7 +1541,13 @@
 			});
 
 			onMounted(() => {
+				wasPreviouslyActive = Boolean(props.active);
 				setMuted();
+				document.addEventListener('visibilitychange', handleVisibilityChange);
+				window.addEventListener('pagehide', handlePageHide);
+				window.addEventListener('pageshow', handlePageShow);
+				window.addEventListener('focus', handlePageShow);
+				window.addEventListener('zulors:app-resume', handleAppResume);
 				unsubscribeNetworkProfile = subscribeNetworkProfile((networkProfile) => {
 					state.networkProfile = networkProfile;
 				});
@@ -1437,6 +1563,12 @@
 
 			onUnmounted(() => {
 				playbackGestureController?.reset();
+				persistResumePosition();
+				document.removeEventListener('visibilitychange', handleVisibilityChange);
+				window.removeEventListener('pagehide', handlePageHide);
+				window.removeEventListener('pageshow', handlePageShow);
+				window.removeEventListener('focus', handlePageShow);
+				window.removeEventListener('zulors:app-resume', handleAppResume);
 
 				unsubscribeNetworkProfile?.();
 				pauseVideo({
