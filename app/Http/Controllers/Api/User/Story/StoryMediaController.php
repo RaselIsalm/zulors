@@ -99,14 +99,7 @@ class StoryMediaController extends Controller
             return $this->uploadStoryImage($mediaFile);
         }
 
-        return $this->responseValidationError([
-            'message' => 'Image uploads use this endpoint. Video files must use the direct video upload flow.',
-            'errors' => [
-                'media_file' => [
-                    'Video files must use the direct video upload flow.'
-                ]
-            ]
-        ]);
+        $this->rejectServerVideoUpload();
     }
 
     public function createDirectVideoUpload(Request $request, R2DirectUploadService $r2DirectUploadService)
