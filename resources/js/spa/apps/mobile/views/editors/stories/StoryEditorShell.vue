@@ -55,7 +55,7 @@
 			return {
 				restoringDraft: restoringDraft,
 				showCreativePreview: computed(() => {
-					return ! legacyFallbackActive.value && storiesEditorStore.creativeEditorEnabled && storiesEditorStore.hasCreativeDraft;
+					return storiesEditorStore.hasCreativeDraft || Boolean(storiesEditorStore.storyMedia);
 				}),
 				showCreativeEditor: computed(() => {
 					return ! legacyFallbackActive.value

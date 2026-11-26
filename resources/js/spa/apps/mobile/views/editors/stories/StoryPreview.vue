@@ -43,7 +43,7 @@
 				<button
 					type="button"
 					class="min-h-12 rounded-2xl border border-white/25 bg-white/10 px-4 text-par-m font-semibold text-white backdrop-blur-md disabled:cursor-wait disabled:opacity-50"
-					v-bind:disabled="isPublishing || isUploading"
+					v-bind:disabled="! media || isPublishing || isUploading"
 					v-on:click="openEditor"
 				>
 					Edit
@@ -51,7 +51,7 @@
 				<button
 					type="button"
 					class="min-h-12 rounded-2xl bg-white px-4 text-par-m font-semibold text-black disabled:cursor-wait disabled:opacity-50"
-					v-bind:disabled="isPublishing || isUploading"
+					v-bind:disabled="! media || isPublishing || isUploading"
 					v-on:click="publish"
 				>
 					Publish story
@@ -93,6 +93,10 @@
 			const publishLabel = computed(() => isPublishing.value ? 'Publishing story' : 'Uploading media');
 
 			const openEditor = () => {
+				if(! storiesEditorStore.creativeEditorEnabled) {
+					toastError('Editing is currently unavailable. You can still publish your original photo or video.');
+					return;
+				}
 				if(isVideo.value && mobileBrowserPattern.test(navigator.userAgent || '')) {
 					showVideoFallback.value = true;
 					return;

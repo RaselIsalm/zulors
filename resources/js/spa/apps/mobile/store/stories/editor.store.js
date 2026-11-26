@@ -197,7 +197,7 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			return this.creativeEditorEnabled && isLocalEditableMedia(file);
 		},
 		startCreativeDraft: function(file, clipCandidate = null) {
-			if(! this.canUseCreativeEditorForFile(file)) {
+			if(! isLocalEditableMedia(file)) {
 				return false;
 			}
 
@@ -236,7 +236,7 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			return true;
 		},
 		openCreativeEditor: function() {
-			if(! this.hasCreativeDraft) return false;
+			if(! this.creativeEditorEnabled || ! this.hasCreativeDraft) return false;
 
 			this.creativeEditorInitialMusicTrack = this.selectedMusicTrack;
 			this.creativeEditorInitialMusicBaked = this.creativeMusicBaked;
