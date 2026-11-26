@@ -33,10 +33,11 @@
 
 				try {
 					const clipCandidate = await getStoryVideoClipCandidate(file);
+					const usesCreativeEditor = storiesEditorStore.startCreativeDraft(file, clipCandidate);
 
 					router.push({ name: 'story_editor' });
 
-					if(storiesEditorStore.startCreativeDraft(file, clipCandidate)) {
+					if(usesCreativeEditor) {
 						return;
 					}
 

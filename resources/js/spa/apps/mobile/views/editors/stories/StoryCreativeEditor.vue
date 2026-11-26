@@ -61,21 +61,56 @@
 				type="button"
 				class="story-creative-editor__tool-button"
 				v-bind:disabled="! editorReady || isBusy"
-				v-on:click="openTextTools"
+				v-on:click="openTool('text')"
 			>
 				<span class="font-semibold">Aa</span>
 				<span>Text</span>
 			</button>
-				<button
-					type="button"
-					class="story-creative-editor__tool-button"
-					v-bind:disabled="! editorReady || isBusy"
-					v-on:click="openMusicPicker"
-				>
+			<button
+				type="button"
+				class="story-creative-editor__tool-button"
+				v-bind:disabled="! editorReady || isBusy"
+				v-on:click="openTool('sticker')"
+			>
+				<SvgIcon name="face-smile" type="line" classes="size-4"></SvgIcon>
+				<span>Sticker</span>
+			</button>
+			<button
+				type="button"
+				class="story-creative-editor__tool-button"
+				v-bind:disabled="! editorReady || isBusy"
+				v-on:click="openTool('filter')"
+			>
+				<SvgIcon name="stars-01" type="line" classes="size-4"></SvgIcon>
+				<span>Filter</span>
+			</button>
+			<button
+				type="button"
+				class="story-creative-editor__tool-button"
+				v-bind:disabled="! editorReady || isBusy"
+				v-on:click="openTool('crop')"
+			>
+				<SvgIcon name="image-01" type="line" classes="size-4"></SvgIcon>
+				<span>Crop</span>
+			</button>
+			<button
+				type="button"
+				class="story-creative-editor__tool-button"
+				v-bind:disabled="! editorReady || isBusy"
+				v-on:click="openTool('effect')"
+			>
+				<SvgIcon name="stars-01" type="line" classes="size-4"></SvgIcon>
+				<span>Effect</span>
+			</button>
+			<button
+				type="button"
+				class="story-creative-editor__tool-button"
+				v-bind:disabled="! editorReady || isBusy || draft?.type !== 'video'"
+				v-on:click="openMusicPicker"
+			>
 				<SvgIcon name="music-note-01" type="line" classes="size-4"></SvgIcon>
 				<span class="truncate">{{ selectedMusicTrack?.title || 'Music' }}</span>
 			</button>
-			<span class="text-cap-l text-white/55">Edits stay on this device until Next</span>
 		</div>
 
 		<StoryMusicPicker
@@ -89,7 +124,6 @@
 
 <script>
 	import { computed, defineComponent, onBeforeUnmount, reactive, ref } from 'vue';
-	import { useRouter } from 'vue-router';
 	import CreativeEditor from '@cesdk/cesdk-js/vue';
 	import {
 		BlurAssetSource,
@@ -121,7 +155,6 @@
 	export default defineComponent({
 		emits: ['fallback'],
 		setup: function(props, { emit }) {
-			const router = useRouter();
 			const storiesEditorStore = useStoriesEditorStore();
 			const instance = ref(null);
 			const editorReady = ref(false);
@@ -158,6 +191,9 @@
 								panels: {
 										settings: true,
 										inspector: true
+								},
+								dock: {
+									show: false
 								},
 								navigation: {
 									action: {
@@ -326,6 +362,10 @@
 				normalizeStoryPage(cesdk);
 				editorReady.value = true;
 				loadingLabel.value = 'Ready';
+
+				if(draft.value.type === 'video' && selectedMusicTrack.value?.id) {
+					await previewMusic(selectedMusicTrack.value);
+				}
 			};
 
 			const handleLoadingStateChange = (loadingState) => {
@@ -426,24 +466,19 @@
 						lastModified: Date.now()
 					});
 
-					busyLabel.value = 'Uploading';
-					await storiesEditorStore.uploadCreativeExport(file, {
+						busyLabel.value = 'Saving';
+						const exportMetadata = {
 						editor_provider: 'imgly_cesdk',
 						editor_export_format: exported.extension,
 						editor_export_resolution: `${exported.width}x${exported.height}`,
 						editor_export_width: exported.width,
 						editor_export_height: exported.height,
 						editor_export_fps: exported.fps || '',
-						editor_export_source_mime: draft.value.mime
-					});
+							editor_export_source_mime: draft.value.mime
+						};
 
-					busyLabel.value = 'Publishing';
-					const result = await storiesEditorStore.publishStory({
-						musicBaked: musicBaked.value
-					});
-					toastSuccess(result?.queued ? 'Story upload started' : __t('toast.story.story_published'));
-					storiesEditorStore.resetEditor();
-					router.push({ name: 'home_index' });
+						storiesEditorStore.applyCreativeExport(file, exportMetadata);
+						toastSuccess('Edits saved');
 				} catch (error) {
 					if(/cannot export videos|browser/i.test(errorMessage(error))) {
 						toastError('This device cannot export edited videos. No media was uploaded.');
@@ -463,9 +498,13 @@
 					return;
 				}
 
-				stopMusicPreview();
-				storiesEditorStore.resetEditor();
-				router.push({ name: 'home_index' });
+					stopMusicPreview();
+
+					if(storiesEditorStore.creativeEditorDirty && ! window.confirm('Discard your unsaved story edits?')) {
+						return;
+					}
+
+					storiesEditorStore.discardCreativeChanges();
 			};
 
 			const openMusicPicker = () => {
@@ -476,15 +515,31 @@
 				state.isMusicPickerOpen = true;
 			};
 
-			const openTextTools = () => {
+			const openTool = (tool) => {
 				if(! editorReady.value || isBusy.value) {
 					return;
 				}
 
+				storiesEditorStore.creativeEditorDirty = true;
+
 				try {
-					instance.value.ui.openPanel('//ly.img.panel/inspector');
+					const assetEntries = {
+						text: ['ly.img.text', 'ly.img.text.components'],
+						sticker: ['ly.img.sticker'],
+						filter: ['ly.img.filter'],
+						effect: ['ly.img.effect'],
+					}[tool];
+
+					if(assetEntries) {
+						instance.value.ui.openPanel('//ly.img.panel/assetLibrary', {
+							payload: { entries: assetEntries }
+						});
+					}
+					else {
+						instance.value.ui.openPanel('//ly.img.panel/inspector');
+					}
 				} catch (error) {
-					console.warn('Unable to open CE.SDK text tools.', error);
+					console.warn(`Unable to open CE.SDK ${tool} tools.`, error);
 				}
 			};
 
@@ -529,7 +584,7 @@
 				saveAndNext: saveAndNext,
 				leaveEditor: leaveEditor,
 				openMusicPicker: openMusicPicker,
-				openTextTools: openTextTools,
+				openTool: openTool,
 				selectMusicTrack: selectMusicTrack,
 				useLegacyEditor: useLegacyEditor
 			};
@@ -573,9 +628,16 @@
 		display: flex;
 		align-items: center;
 		gap: 0.625rem;
+		overflow-x: auto;
+		overscroll-behavior-x: contain;
+		scrollbar-width: none;
 		min-height: 3.25rem;
 		padding: 0.5rem 0.75rem;
 		background: rgba(0, 0, 0, 0.88);
+	}
+
+	.story-creative-editor__footer::-webkit-scrollbar {
+		display: none;
 	}
 
 	.story-creative-editor__icon-button,

@@ -57,7 +57,56 @@ class StoryMediaController extends Controller
 
     public function uploadMedia(Request $request)
     {
-        $this->rejectServerMediaUpload();
+        if(! $this->canAddStoryFrame()) {
+            return $this->responseValidationError([
+                'message' => __('story.validation.frame_count.max', ['max' => config('story.max_frames_per_story')]),
+                'errors' => [
+                    'media_file' => [
+                        __('story.validation.frame_count.max', ['max' => config('story.max_frames_per_story')])
+                    ]
+                ]
+            ]);
+        }
+
+        $request->validate([
+            'media_file' => ['required', 'file'],
+            'editor_provider' => ['nullable', 'string', 'max:64'],
+            'editor_export_format' => ['nullable', 'string', 'max:16'],
+            'editor_export_resolution' => ['nullable', 'string', 'max:32'],
+            'editor_export_width' => ['nullable', 'integer', 'min:1', 'max:20000'],
+            'editor_export_height' => ['nullable', 'integer', 'min:1', 'max:20000'],
+            'editor_export_fps' => ['nullable', 'numeric', 'min:1', 'max:120'],
+            'editor_export_source_mime' => ['nullable', 'string', 'max:120'],
+            ...OriginalAudioEligibility::metadataValidationRules(),
+        ]);
+
+        if($this->draftStoryFrame->media()->exists()) {
+            return $this->responseValidationError([
+                'message' => 'Please remove the current story media before uploading a new file.',
+                'errors' => [
+                    'media_file' => [
+                        'Please remove the current story media before uploading a new file.'
+                    ]
+                ]
+            ]);
+        }
+
+        $mediaFile = $request->file('media_file');
+
+        if($mediaFile && str_starts_with((string) $mediaFile->getMimeType(), 'image/')) {
+            $this->validateStoryImage($mediaFile);
+
+            return $this->uploadStoryImage($mediaFile);
+        }
+
+        return $this->responseValidationError([
+            'message' => 'Image uploads use this endpoint. Video files must use the direct video upload flow.',
+            'errors' => [
+                'media_file' => [
+                    'Video files must use the direct video upload flow.'
+                ]
+            ]
+        ]);
     }
 
     public function createDirectVideoUpload(Request $request, R2DirectUploadService $r2DirectUploadService)

@@ -5,6 +5,7 @@ import { directVideoUpload } from '@/kernel/services/media/r2-direct-video-uploa
 import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
 import { useStoriesStore } from '@M/store/stories/stories.store.js';
 import { appendStoryMusicUploadMetadata, storyMusicPublishPayload, storyMusicUploadOptions } from '@/kernel/services/media/story-music-upload.js';
+import { clearStoryEditorDraft, loadStoryEditorDraft, saveStoryEditorDraft } from '@/kernel/services/media/story-editor-draft.js';
 
 const STORY_EDITOR_PROVIDER = String(import.meta.env.VITE_STORY_EDITOR_PROVIDER || 'legacy').toLowerCase();
 const STORY_EDITOR_LEGACY_FALLBACK = String(import.meta.env.VITE_STORY_EDITOR_LEGACY_FALLBACK ?? 'true') !== 'false';
@@ -40,7 +41,12 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			publicationOptions: {},
 			storyMediaObjectUrl: null,
 			creativeDraft: null,
+			creativeEditorOpen: false,
+			creativeEditorDirty: false,
+			creativeEditorInitialMusicTrack: null,
+			creativeEditorInitialMusicBaked: false,
 			creativeMusicBaked: false,
+			isPublishing: false,
 			selectedMusicTrack: null,
 			storyData: {
 				content: ''
@@ -49,7 +55,23 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 	},
 	getters: {
 		isFormValid: (state) => {
-			return state.storyMedia !== null && !state.isUploading;
+			return Boolean(state.storyMedia || state.creativeDraft?.file) && !state.isUploading && !state.isPublishing;
+		},
+		previewMedia: (state) => {
+			if(state.storyMedia) return state.storyMedia;
+
+			if(state.creativeDraft?.file && state.creativeDraft?.objectUrl) {
+				return {
+					type: state.creativeDraft.type,
+					source_url: state.creativeDraft.objectUrl,
+					preview_url: state.creativeDraft.objectUrl,
+					mime: state.creativeDraft.mime,
+					name: state.creativeDraft.name,
+					is_local_preview: true,
+				};
+			}
+
+			return null;
 		},
 		hasCreativeDraft: (state) => {
 			return Boolean(state.creativeDraft?.file && state.creativeDraft?.objectUrl);
@@ -70,18 +92,69 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			this.storyMediaObjectUrl = null;
 		},
 		releaseCreativeDraft: function() {
-			if(this.creativeDraft?.objectUrl) URL.revokeObjectURL(this.creativeDraft.objectUrl);
+			new Set([
+				this.creativeDraft?.objectUrl,
+				this.creativeDraft?.sourceObjectUrl,
+			]).forEach((url) => {
+				if(url) URL.revokeObjectURL(url);
+			});
+
 			this.creativeDraft = null;
+		},
+		persistCreativeDraft: function() {
+			if(! this.creativeDraft?.file) return;
+
+			saveStoryEditorDraft({
+				...this.creativeDraft,
+				selectedMusicTrack: this.selectedMusicTrack ? { ...this.selectedMusicTrack } : null,
+				musicBaked: this.creativeMusicBaked,
+			});
+		},
+		restoreCreativeDraft: async function() {
+			if(this.creativeDraft || this.storyMedia) return false;
+
+			const draft = await loadStoryEditorDraft();
+			if(! draft?.blob) return false;
+
+			const file = new File([draft.blob], draft.name || 'story-media', {
+				type: draft.mime || draft.blob.type || 'application/octet-stream',
+				lastModified: Date.now(),
+			});
+			const objectUrl = URL.createObjectURL(file);
+
+			this.creativeDraft = {
+				file,
+				objectUrl,
+				sourceObjectUrl: objectUrl,
+				name: draft.name || file.name,
+				mime: draft.mime || file.type,
+				type: draft.type || (file.type?.startsWith('video/') ? 'video' : 'image'),
+				clipCandidate: draft.clipCandidate || null,
+				legacyUploadOptions: draft.legacyUploadOptions || {},
+				exportMetadata: draft.exportMetadata || {},
+				edited: Boolean(draft.edited),
+				createdAt: draft.updatedAt || Date.now(),
+			};
+			this.selectedMusicTrack = draft.selectedMusicTrack || null;
+			this.creativeMusicBaked = Boolean(draft.musicBaked);
+			this.creativeEditorOpen = false;
+
+			return true;
 		},
 		resetEditor: function() {
 			this.publicationSelection = null;
 			this.publicationOptions = {};
 			this.releaseMediaPreview();
 			this.releaseCreativeDraft();
+			this.creativeEditorOpen = false;
+			this.creativeEditorDirty = false;
+			this.creativeEditorInitialMusicTrack = null;
+			this.creativeEditorInitialMusicBaked = false;
 			this.clearVideoClipCandidate();
 			this.creativeMusicBaked = false;
 			this.discardUploadedMedia = false;
 			this.isUploading = false;
+			this.isPublishing = false;
 			this.uploadProgress = 0;
 			this.storyMedia = null;
 			this.storyImageTransform = { scale: 1, translateX: 0, translateY: 0, rotation: 0 };
@@ -89,12 +162,17 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			this.storyData = {
 				content: ''
 			}
+			clearStoryEditorDraft();
 		},
 		setSelectedMusicTrack: function(trackData) {
 			this.selectedMusicTrack = trackData;
+			if(this.creativeEditorOpen) this.creativeEditorDirty = true;
+			this.persistCreativeDraft();
 		},
 		clearSelectedMusicTrack: function() {
 			this.selectedMusicTrack = null;
+			if(this.creativeEditorOpen) this.creativeEditorDirty = true;
+			this.persistCreativeDraft();
 		},
 		setVideoClipCandidate: function(clipCandidate) {
 			this.clearVideoClipCandidate();
@@ -132,6 +210,10 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			this.isUploading = false;
 			this.uploadProgress = 0;
 			this.storyMedia = null;
+			this.creativeEditorOpen = false;
+			this.creativeEditorDirty = false;
+			this.creativeEditorInitialMusicTrack = null;
+			this.creativeEditorInitialMusicBaked = false;
 			this.creativeMusicBaked = false;
 			this.selectedMusicTrack = null;
 			this.storyData = {
@@ -148,8 +230,54 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 				legacyUploadOptions: storyClipOptionsFromCandidate(clipCandidate),
 				createdAt: Date.now()
 			};
+			this.creativeDraft.sourceObjectUrl = this.creativeDraft.objectUrl;
+			this.persistCreativeDraft();
 
 			return true;
+		},
+		openCreativeEditor: function() {
+			if(! this.hasCreativeDraft) return false;
+
+			this.creativeEditorInitialMusicTrack = this.selectedMusicTrack;
+			this.creativeEditorInitialMusicBaked = this.creativeMusicBaked;
+			this.creativeEditorDirty = false;
+			this.creativeEditorOpen = true;
+
+			return true;
+		},
+		closeCreativeEditor: function() {
+			this.creativeEditorOpen = false;
+			this.creativeEditorDirty = false;
+			this.creativeEditorInitialMusicTrack = null;
+			this.creativeEditorInitialMusicBaked = false;
+		},
+		discardCreativeChanges: function() {
+			this.selectedMusicTrack = this.creativeEditorInitialMusicTrack || null;
+			this.creativeMusicBaked = this.creativeEditorInitialMusicBaked;
+			this.closeCreativeEditor();
+			this.persistCreativeDraft();
+		},
+		applyCreativeExport: function(mediaFile, exportMetadata = {}) {
+			if(! this.creativeDraft?.file || ! mediaFile) {
+				throw new Error('The story draft is no longer available.');
+			}
+
+			const previousObjectUrl = this.creativeDraft.objectUrl;
+			const objectUrl = URL.createObjectURL(mediaFile);
+
+			this.creativeDraft.file = mediaFile;
+			this.creativeDraft.objectUrl = objectUrl;
+			this.creativeDraft.mime = mediaFile.type || this.creativeDraft.mime;
+			this.creativeDraft.name = mediaFile.name || this.creativeDraft.name;
+			this.creativeDraft.exportMetadata = { ...exportMetadata };
+			this.creativeDraft.edited = true;
+
+			if(previousObjectUrl && previousObjectUrl !== this.creativeDraft.sourceObjectUrl) {
+				URL.revokeObjectURL(previousObjectUrl);
+			}
+
+			this.closeCreativeEditor();
+			this.persistCreativeDraft();
 		},
 		uploadCreativeDraftWithLegacy: async function() {
 			const draft = this.creativeDraft;
@@ -172,31 +300,55 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 		},
 		setCreativeMusicBaked: function(value) {
 			this.creativeMusicBaked = Boolean(value);
+			this.persistCreativeDraft();
 		},
 		publishStory: async function(options = {}) {
-			const musicPayload = storyMusicPublishPayload(this.selectedMusicTrack, {
-				bakedIntoMedia: Boolean(options.musicBaked)
-			});
+			if(this.isPublishing) return;
 
-			if (this.publicationSelection) {
-				await publicationManager.enqueue({ kind: 'story', content: this.storyData.content, privacy: this.storyData.privacy || 'all', selected_user_ids: this.storyData.selected_user_ids || [], ...this.publicationOptions, ...musicPayload }, [this.publicationSelection]);
-				return { queued: true };
-			}
-			const storiesStore = useStoriesStore();
-			if (this.storyMedia) {
-				await colibriAPI().storyEditor().with({
-					content: this.storyData.content,
-					story_image_transform: this.storyMedia.type === 'image' ? this.storyImageTransform : undefined,
-					...musicPayload
-				}).sendTo('create').then((response) => {
-					if(response.data.data) {
-						storiesStore.prependFeedItem(response.data.data);
-					}
-				}).catch((error) => {
-					if(error.response) {
-						throw new Error(error.response.data.message);
-					}
+			this.isPublishing = true;
+
+			try {
+				if(this.creativeDraft?.file && ! this.storyMedia) {
+					await this.uploadMedia(this.creativeDraft.file, {
+						...(this.creativeDraft.legacyUploadOptions || {}),
+						...(this.creativeDraft.exportMetadata || {}),
+						skip_publication_manager: true,
+					});
+				}
+
+				const selectedTrackForPublish = this.creativeDraft?.file && ! this.creativeDraft.edited
+					? null
+					: this.selectedMusicTrack;
+				const musicPayload = storyMusicPublishPayload(selectedTrackForPublish, {
+					bakedIntoMedia: (! this.creativeDraft || this.creativeDraft.edited)
+						&& Boolean(options.musicBaked || this.creativeMusicBaked)
 				});
+
+				if (this.publicationSelection) {
+					await publicationManager.enqueue({ kind: 'story', content: '', privacy: this.storyData.privacy || 'all', selected_user_ids: this.storyData.selected_user_ids || [], ...this.publicationOptions, ...musicPayload }, [this.publicationSelection]);
+					return { queued: true };
+				}
+
+				const storiesStore = useStoriesStore();
+				if (this.storyMedia) {
+					await colibriAPI().storyEditor().with({
+						content: '',
+						story_image_transform: this.storyMedia.type === 'image' ? this.storyImageTransform : undefined,
+						...musicPayload
+					}).sendTo('create').then((response) => {
+						if(response.data.data) {
+							storiesStore.prependFeedItem(response.data.data);
+						}
+					}).catch((error) => {
+						if(error.response) {
+							throw new Error(error.response.data.message);
+						}
+						throw error;
+					});
+				}
+			}
+			finally {
+				this.isPublishing = false;
 			}
 		},
 		uploadMedia: async function(mediaFile, options = {}) {
@@ -271,7 +423,44 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 				}
 			}
 			if(mediaFile.type.startsWith('image/')) {
-				throw new Error('Direct R2 story photo uploads are unavailable. The photo was not sent to the application server.');
+				this.isUploading = true;
+
+				try {
+					const formData = new FormData();
+					formData.append('media_file', mediaFile, mediaFile.name || `zulors-story-${Date.now()}.jpg`);
+					appendStoryMusicUploadMetadata(formData, uploadOptions);
+
+					const response = await colibriAPI().storyEditor()
+						.with(formData)
+						.withHeaders({ 'Content-Type': 'multipart/form-data' })
+						.uploadProgress((event) => {
+							const total = Number(event?.total || mediaFile.size || 1);
+							this.uploadProgress = Math.min(100, Math.round((Number(event?.loaded || 0) / total) * 100));
+						})
+						.sendTo('media/upload');
+
+					const media = response.data?.data;
+					if(! media) throw new Error('The story image upload returned no media.');
+
+					this.releaseMediaPreview();
+					this.storyMediaObjectUrl = URL.createObjectURL(mediaFile);
+					this.storyMedia = {
+						...media,
+						source_url: media.source_url || this.storyMediaObjectUrl,
+						preview_url: media.preview_url || media.source_url || this.storyMediaObjectUrl,
+						is_local_preview: ! (media.source_url || media.preview_url),
+					};
+
+					return media;
+				}
+				catch(error) {
+					if(error.response) throw new Error(error.response.data.message || 'Story image upload failed.');
+					throw error;
+				}
+				finally {
+					this.isUploading = false;
+					this.uploadProgress = 0;
+				}
 			}
 			throw new Error('This story attachment type is unsupported. Choose a photo or video for direct R2 upload.');
 		},
