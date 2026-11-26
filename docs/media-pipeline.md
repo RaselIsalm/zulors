@@ -21,6 +21,13 @@ manifest and segments to R2. An opt-in allowlisted Cloudflare Stream pilot can
 copy the finished R2 object for managed HLS; the Stream URL is selected only
 after its signed ready webhook. R2 MP4/HLS stays available as fallback.
 
+Story videos keep their canonical processed MP4. Optional R2 HLS generation
+uses the same bounded rendition ladder and preserves the MP4 as fallback; it
+is controlled separately by `MEDIA_STORIES_HLS_ENABLED` and stays disabled
+until the Story player is verified in staging. Story HLS jobs use the normal
+video queue, and the stale-job reconciler includes them only while that flag is
+enabled.
+
 During the canonical-playback canary, the post stays published but its raw upload
 is not exposed as a playback URL to canary owners' viewers. Playback becomes
 ready after the generated H.264/yuv420p MP4 passes FFprobe validation; HLS remains

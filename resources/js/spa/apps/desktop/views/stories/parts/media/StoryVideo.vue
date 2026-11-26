@@ -6,9 +6,9 @@
             <button type="button" class="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black" v-on:click="retryMedia">Retry</button>
         </div>
         <video
-            v-if="showBlurBackdrop && mediaSourceUrl"
+            v-if="showBlurBackdrop && mediaSourceUrl && !hlsUrl"
             ref="storyBackdropVideo"
-            v-bind:src="mediaSourceUrl"
+            v-bind:src="hlsUrl ? null : mediaSourceUrl"
             class="story-media-backdrop"
             webkit-playsinline
             playsinline
@@ -17,12 +17,12 @@
             aria-hidden="true"
             tabindex="-1"
         ></video>
-        <div v-if="showBlurBackdrop" class="story-media-backdrop-shade"></div>
+        <div v-if="showBlurBackdrop && !hlsUrl" class="story-media-backdrop-shade"></div>
         <video
             v-bind:key="reloadToken"
             v-show="! isLoading && !hasError"
             ref="storyVideo"
-            v-bind:src="mediaSourceUrl"
+            v-bind:src="hlsUrl ? null : mediaSourceUrl"
             v-bind:poster="previewUrl"
             v-bind:class="foregroundFitClass"
             v-on:loadedmetadata="handleLoadedMetadata"
@@ -36,15 +36,17 @@
             playsinline
             preload="metadata"
         >
-            <source v-bind:src="mediaSourceUrl" v-bind:type="frameData.media.mime || 'video/mp4'">
+            <source v-if="! hlsUrl" v-bind:src="mediaSourceUrl" v-bind:type="frameData.media.mime || 'video/mp4'">
         </video>
     </div>
 </template>
 <script>
-    import { computed, defineComponent, ref, inject, onMounted, watch, onBeforeUnmount } from 'vue';
+    import { computed, defineComponent, ref, inject, onMounted, watch, onBeforeUnmount, nextTick } from 'vue';
     import { colibriEventBus } from '@/kernel/events/bus/index.js';
     import { elementVideoDimensions, shouldUseStoryBlurBackdrop, storyMediaObjectFitClass } from '@/kernel/services/media/story-media-presentation.js';
     import { frameHasStoryMusic } from '@/kernel/services/media/story-music-playback.js';
+    import { createAdaptiveVideoPlaybackController } from '@/kernel/services/media/adaptive-video/playback.js';
+    import { buildAdaptiveVideoSource, getDirectPlaybackFallback } from '@/kernel/services/media/adaptive-video/index.js';
     import StoryMediaLoader from '@D/views/stories/parts/media/StoryMediaLoader.vue';
 
     export default defineComponent({
@@ -63,11 +65,16 @@
             const frameData = ref(props.frameData);
             const playerState = inject('playerState');
             const loadedDimensions = ref({});
+            let playbackController = null;
             const mediaItem = computed(() => {
                 return frameData.value.media || {};
             });
             const mediaSourceUrl = computed(() => {
                 return mediaItem.value.source_url || mediaItem.value.preview_url || '';
+            });
+            const hlsUrl = computed(() => {
+                const playback = mediaItem.value.metadata?.playback || {};
+                return playback.hls_state === 'ready' ? String(playback.hls || '') : '';
             });
             const previewUrl = computed(() => mediaItem.value.lqip_base64 || mediaItem.value.thumbnail_url || '');
             const errorMessage = computed(() => mediaSourceUrl.value
@@ -96,12 +103,34 @@
                 colibriEventBus.on('story:unmute', unmuteVideo);
 
                 colibriEventBus.on('story:mute', muteVideo);
+
+                attachAdaptiveSource();
             });
 
             onBeforeUnmount(() => {
                 colibriEventBus.off('story:unmute', unmuteVideo);
                 colibriEventBus.off('story:mute', muteVideo);
+                playbackController?.destroy();
+                playbackController = null;
             });
+
+            const attachAdaptiveSource = () => {
+                if(! hlsUrl.value || ! storyVideo.value) {
+                    return;
+                }
+
+                playbackController?.destroy();
+                playbackController = createAdaptiveVideoPlaybackController(storyVideo.value, {
+                    onFatalError: () => {
+                        isLoading.value = false;
+                        hasError.value = true;
+                    }
+                });
+                playbackController.attach(
+                    buildAdaptiveVideoSource({ ...mediaItem.value, source_url: hlsUrl.value }),
+                    getDirectPlaybackFallback(mediaItem.value)
+                );
+            };
 
             const muteVideo = () => {
                 storyVideo.value.muted = true;
@@ -167,6 +196,7 @@
                 storyVideo: storyVideo,
                 storyBackdropVideo: storyBackdropVideo,
                 mediaSourceUrl: mediaSourceUrl,
+                hlsUrl: hlsUrl,
                 previewUrl: previewUrl,
                 hasError: hasError,
                 errorMessage: errorMessage,
@@ -197,13 +227,20 @@
                     hasError.value = false;
                     isLoading.value = true;
                     reloadToken.value += 1;
-                    requestAnimationFrame(() => {
+                    playbackController?.destroy();
+                    playbackController = null;
+                    nextTick(() => {
                         if (!storyVideo.value || !mediaSourceUrl.value) {
                             isLoading.value = false;
                             hasError.value = true;
                             return;
                         }
-                        storyVideo.value.load();
+                        if(hlsUrl.value) {
+                            attachAdaptiveSource();
+                        }
+                        else {
+                            storyVideo.value.load();
+                        }
                     });
                 }
             }

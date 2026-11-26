@@ -74,6 +74,9 @@
     import { colibriAPI } from '@/kernel/services/api-client/native/index.js';
     import { useInstantRevalidation } from '@/kernel/vue/composables/instant-revalidation/index.js';
     import { normalizeProfileUsername, isValidProfileUsername } from '@/kernel/support/profile-routing/index.js';
+    import { useAuthStore } from '@D/store/auth/auth.store.js';
+    import { readLocalFirstSnapshot, writeLocalFirstSnapshot } from '@/kernel/services/cache/index.js';
+    import { profileHeaderCacheKey, profileHeaderSnapshot, shouldHydrateCachedProfileSnapshot } from '@/kernel/services/cache/profile-cache.js';
 
     import ContentTabs from '@D/components/general/tabs/content/ContentTabs.vue';
     import TabsLink from '@D/components/general/tabs/content/parts/TabsLink.vue';
@@ -98,6 +101,8 @@
 			const profileId = ref(normalizeProfileUsername(props.id));
             const route = useRoute();
             const router = useRouter();
+            const authStore = useAuthStore();
+            let profileRequestId = 0;
             const state = reactive({
                 isLoading: true
             });
@@ -128,9 +133,7 @@
             };
 
 			const fetchProfile = async (showLoader = true) => {
-				if(showLoader) {
-                    state.isLoading = true;
-                }
+				const requestId = ++profileRequestId;
 
                 const currentProfileId = normalizeProfileUsername(profileId.value);
                 profileId.value = currentProfileId;
@@ -143,16 +146,39 @@
                     return;
                 }
 
+                const cacheKey = profileHeaderCacheKey(authStore.user?.id, currentProfileId);
+                const cachedProfile = cacheKey
+                    ? readLocalFirstSnapshot(cacheKey, null, 30000, 5 * 60 * 1000).data
+                    : null;
+
+                if(cachedProfile && shouldHydrateCachedProfileSnapshot(profileData.value, showLoader)) {
+                    profileData.value = cachedProfile;
+                    state.isLoading = false;
+                }
+                else if(showLoader) {
+                    profileData.value = {};
+                    state.isLoading = true;
+                }
+
                 try {
 				    const response = await colibriAPI().userProfile().params({ id: currentProfileId }).getFrom('profile');
 
+                    if(requestId !== profileRequestId || currentProfileId !== profileId.value) {
+                        return;
+                    }
+
                     profileData.value = response.data.data;
+                    if(cacheKey) {
+                        writeLocalFirstSnapshot(cacheKey, profileHeaderSnapshot(response.data.data));
+                    }
                 } catch (error) {
-                    if(showLoader) {
+                    if(requestId === profileRequestId && showLoader && ! cachedProfile) {
                         await redirectProfileHome();
                     }
                 } finally {
-                    state.isLoading = false;
+                    if(requestId === profileRequestId) {
+                        state.isLoading = false;
+                    }
                 }
 			};
 

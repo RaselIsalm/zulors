@@ -101,4 +101,7 @@ return [
         'timeout_seconds' => (int) env('MEDIA_REELS_HLS_TIMEOUT_SECONDS', 21600),
         'stale_after_minutes' => (int) env('MEDIA_REELS_HLS_STALE_AFTER_MINUTES', 120),
     ],
+    'stories_hls' => [
+        'enabled' => (bool) env('MEDIA_STORIES_HLS_ENABLED', false),
+    ],
 ];

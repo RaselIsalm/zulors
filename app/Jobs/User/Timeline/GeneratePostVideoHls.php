@@ -7,6 +7,7 @@ use App\Enums\Media\MediaType;
 use App\Events\User\Timeline\MediaUpdatedEvent;
 use App\Models\Media;
 use App\Models\Post;
+use App\Models\StoryFrame;
 use App\Services\Filesystem\Upload\VideoUploadService;
 use App\Services\Media\ReelsHlsRollout;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -95,8 +96,14 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
     {
         $media = Media::query()->with('mediaable')->find($this->mediaId);
 
+        $isPost = $media?->mediaable instanceof Post;
+        $isStory = $media?->mediaable instanceof StoryFrame;
+        $enabled = $isPost
+            ? $rollout->processingEnabled()
+            : ($isStory && (bool) config('media.stories_hls.enabled', false));
+
         if (! $media || ! $media->type->isVideo() || ! $media->status->isProcessed()
-            || ! ($media->mediaable instanceof Post) || ! $rollout->processingEnabled()
+            || (! $isPost && ! $isStory) || ! $enabled
             || data_get($media->metadata, 'provider') !== 'r2') {
             return;
         }
@@ -115,11 +122,13 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         $queueAgeSeconds = $this->queueAgeSeconds($metadata);
         $workDirectory = storage_path('app/tmp/reel-hls/'.$media->id.'-'.bin2hex(random_bytes(5)));
         $sourcePath = $workDirectory.'/source.'.($this->safeExtension($source['extension']) ?: 'mp4');
+        $mediaPrefix = $isStory ? 'uploads/stories/videos' : 'uploads/posts/videos';
+        $outputPrefix = $mediaPrefix.'/'.$media->id.'/hls/'.$sourceSignature;
         @mkdir($workDirectory, 0775, true);
         $failureStage = 'initialize';
 
         try {
-            $this->updateMetadata($media, function (array $next) use ($sourceSignature, $attempt): array {
+            $this->updateMetadata($media, function (array $next) use ($sourceSignature, $attempt, $outputPrefix): array {
                 $next['playback_state'] = 'ready';
                 $next['background_processing_state'] = 'processing';
                 $next['background_processing_progress'] = 1;
@@ -128,6 +137,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 $next['playback'] = array_merge((array) ($next['playback'] ?? []), [
                     'hls' => null,
                     'hls_state' => 'processing',
+                    'hls_prefix' => $outputPrefix,
                     'hls_source_signature' => $sourceSignature,
                     'renditions' => [],
                 ]);
@@ -179,7 +189,6 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             $renditions = [];
             $playlistEntries = [];
             $diskName = (string) $media->disk;
-            $outputPrefix = 'uploads/posts/videos/'.$media->id.'/hls/'.$sourceSignature;
             $outputDisk = Storage::disk($diskName);
             $progressBase = 5;
             $progressPerRendition = (int) floor(75 / count($targets));
@@ -273,6 +282,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
                 $next['playback'] = array_merge((array) ($next['playback'] ?? []), [
                     'hls' => storage_url($outputPrefix.'/master.m3u8', $diskName),
                     'hls_state' => 'ready',
+                    'hls_prefix' => $outputPrefix,
                     'hls_source_signature' => $sourceSignature,
                     'encoding_version' => self::ENCODING_VERSION,
                     'source_dimensions' => [
@@ -708,8 +718,14 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
         $media->metadata = $mutator($media->metadata ?? []);
         $media->save();
 
-        if ($broadcast && $media->mediaable instanceof Post && $media->mediaable->user_id) {
-            event(new MediaUpdatedEvent($media->refresh(), (int) $media->mediaable->user_id));
+        if ($broadcast) {
+            $ownerId = $media->mediaable instanceof Post
+                ? (int) $media->mediaable->user_id
+                : ($media->mediaable instanceof StoryFrame ? (int) $media->mediaable->story?->user_id : 0);
+
+            if ($ownerId > 0) {
+                event(new MediaUpdatedEvent($media->refresh(), $ownerId));
+            }
         }
     }
 
@@ -723,6 +739,7 @@ class GeneratePostVideoHls implements ShouldBeUnique, ShouldQueue
             $metadata['playback'] = array_merge((array) ($metadata['playback'] ?? []), [
                 'hls' => null,
                 'hls_state' => 'skipped',
+                'hls_prefix' => null,
                 'hls_source_signature' => $sourceSignature,
                 'encoding_version' => self::ENCODING_VERSION,
                 'source_dimensions' => [

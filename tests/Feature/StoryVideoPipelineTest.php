@@ -9,6 +9,7 @@ use App\Enums\Story\StoryStatus;
 use App\Enums\Story\StoryType;
 use App\Enums\User\UserStatus;
 use App\Jobs\User\Story\ProcessStoryVideo;
+use App\Jobs\User\Timeline\GeneratePostVideoHls;
 use App\Models\Story;
 use App\Models\User;
 use App\Services\Filesystem\Upload\ImageUploadService;
@@ -41,6 +42,8 @@ class StoryVideoPipelineTest extends TestCase
 
     public function test_story_worker_transcodes_r2_source_and_deletes_original(): void
     {
+        Queue::fake();
+        config(['media.stories_hls.enabled' => true]);
         $original = $this->createVideoFixture();
         $story = $this->createStory($this->createUser('story-worker-owner'));
         $frame = $story->frames()->create([
@@ -54,6 +57,9 @@ class StoryVideoPipelineTest extends TestCase
         $thumbnailInfo = getimagesize(\Illuminate\Support\Facades\Storage::disk('r2_final')->path($media->thumbnail_path));
         $this->assertSame([320, 180], [$thumbnailInfo[0], $thumbnailInfo[1]]);
         $this->assertSame(StoryStatus::ACTIVE, $frame->refresh()->status);
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool =>
+            $job->mediaId === (int) $media->id
+        );
         $path = $media->source_path;
         (new ProcessStoryVideo($frame))->handle();
         $this->assertSame($path, $media->refresh()->source_path);

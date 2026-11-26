@@ -6,18 +6,22 @@ use App\Enums\Media\MediaStatus;
 use App\Enums\Media\MediaType;
 use App\Jobs\User\Timeline\GeneratePostVideoHls;
 use App\Models\Media;
+use App\Models\Post;
+use App\Models\StoryFrame;
 use App\Services\Media\ReelsHlsRollout;
 use Illuminate\Console\Command;
 
 class ReconcileReelHlsProcessing extends Command
 {
-    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--missing-only : Queue only post videos with missing or failed HLS output} {--rebuild : Queue videos without the current HLS encoding version} {--media-id=* : Queue specific processed R2 post video media IDs} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
+    protected $signature = 'media:reconcile-reel-hls {--stale-after= : Override stale processing age in minutes} {--retry-failed : Requeue terminally failed HLS processing} {--missing-only : Queue videos with missing or failed HLS output} {--rebuild : Queue videos without the current HLS encoding version} {--media-id=* : Queue specific processed R2 video media IDs} {--include-stories : Include Story videos when their HLS flag is enabled} {--limit=200 : Maximum jobs to queue in this run, up to 200}';
 
-    protected $description = 'Requeue stale, failed, or outdated post-video HLS jobs.';
+    protected $description = 'Requeue stale, failed, or outdated post and optional Story video HLS jobs.';
 
     public function handle(ReelsHlsRollout $rollout): int
     {
-        if (! $rollout->processingEnabled()) {
+        $includeStories = (bool) $this->option('include-stories')
+            && (bool) config('media.stories_hls.enabled', false);
+        if (! $rollout->processingEnabled() && ! $includeStories) {
             $this->info('Reels HLS processing is disabled.');
 
             return self::SUCCESS;
@@ -28,7 +32,8 @@ class ReconcileReelHlsProcessing extends Command
         $query = Media::query()
             ->where('type', MediaType::VIDEO->value)
             ->where('status', MediaStatus::PROCESSED->value)
-            ->where('metadata->provider', 'r2');
+            ->where('metadata->provider', 'r2')
+            ->whereIn('mediaable_type', $includeStories ? [Post::class, StoryFrame::class] : [Post::class]);
 
         $requestedMediaIds = (array) $this->option('media-id');
         if ($requestedMediaIds !== []) {
@@ -52,7 +57,6 @@ class ReconcileReelHlsProcessing extends Command
             }
 
             $query
-                ->where('mediaable_type', \App\Models\Post::class)
                 ->whereIn('id', $mediaIds)
                 ->where(function ($state): void {
                     $state->whereNull('metadata->background_processing_state')
@@ -61,7 +65,6 @@ class ReconcileReelHlsProcessing extends Command
                 ->orderBy('id');
         } elseif ($this->option('missing-only')) {
             $query
-                ->where('mediaable_type', \App\Models\Post::class)
                 ->where(function ($state): void {
                     $state->whereNull('metadata->playback->hls_state')
                         ->orWhereIn('metadata->playback->hls_state', ['unset', 'failed']);
@@ -73,7 +76,6 @@ class ReconcileReelHlsProcessing extends Command
                 ->orderBy('id');
         } elseif ($this->option('rebuild')) {
             $query
-                ->where('mediaable_type', \App\Models\Post::class)
                 ->where(function ($version): void {
                     $version->whereNull('metadata->playback->encoding_version')
                         ->orWhere('metadata->playback->encoding_version', '<>', GeneratePostVideoHls::ENCODING_VERSION);
@@ -126,7 +128,8 @@ class ReconcileReelHlsProcessing extends Command
             GeneratePostVideoHls::dispatch((int) $media->id);
         }
 
-        $this->info('Requeued '.$mediaItems->count().' reel HLS job(s).');
+        $label = $includeStories ? 'video' : 'reel';
+        $this->info('Requeued '.$mediaItems->count().' '.$label.' HLS job(s).');
 
         return self::SUCCESS;
     }

@@ -53,6 +53,7 @@
 	import { readLocalFirstSnapshot, writeLocalFirstSnapshot } from '@/kernel/services/cache/index.js';
 	import { useAuthStore } from '@M/store/auth/auth.store.js';
 	import { normalizeProfileUsername, isValidProfileUsername } from '@/kernel/support/profile-routing/index.js';
+	import { profileHeaderCacheKey, profileHeaderSnapshot } from '@/kernel/services/cache/profile-cache.js';
 	import { useAutoHideHeader } from '@M/core/services/auto-hide-header.js';
 	import { shouldHydrateCachedProfileSnapshot } from '@M/views/profile/profile-cache.js';
 
@@ -107,51 +108,6 @@
 				}).catch(() => {});
 			};
 
-			const profileCacheKey = (username) => {
-				const viewerId = authStore.user?.id;
-
-				return viewerId && username
-					? `zulors.profile.header.v1.viewer-${viewerId}.profile-${encodeURIComponent(username)}`
-					: null;
-			};
-
-			const profileHeaderSnapshot = (data) => {
-				const visibleFields = [
-					'id', 'name', 'first_name', 'last_name', 'username', 'caption', 'avatar_url',
-					'cover_url', 'profile_url', 'bio', 'join_date', 'website', 'verified',
-					'publications_count', 'followers_count', 'following_count', 'country',
-					'country_name', 'city'
-				];
-				const snapshot = {};
-
-				for(const field of visibleFields) {
-					if(data[field] !== undefined) {
-						snapshot[field] = data[field];
-					}
-				}
-
-				return {
-					...snapshot,
-					meta: {
-						is_owner: false,
-						permissions: {
-							can_sanction: false,
-							can_follow: false,
-							can_mention: false,
-							can_message: false,
-							can_block: false,
-							can_report: false,
-							can_mute: false
-						},
-						relationship: {
-							follow: { following: false, followed_by: false, requested: false },
-							block: { blocking: false, blocked_by: false },
-							muting: { muting: false }
-						}
-					}
-				};
-			};
-
 			const fetchProfile = async (showLoader = true) => {
 				const requestId = ++profileRequestId;
 				const currentProfileId = normalizeProfileUsername(profileId.value);
@@ -165,7 +121,7 @@
 					return;
 				}
 
-				const cacheKey = profileCacheKey(currentProfileId);
+				const cacheKey = profileHeaderCacheKey(authStore.user?.id, currentProfileId);
 				const cachedProfile = cacheKey
 					? readLocalFirstSnapshot(cacheKey, null, 30000, 5 * 60 * 1000).data
 					: null;

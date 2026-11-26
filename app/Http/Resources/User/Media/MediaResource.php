@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use App\Services\Media\ReelsHlsRollout;
 use App\Services\Media\CanonicalVideoPlaybackPolicy;
+use App\Models\Post;
+use App\Models\StoryFrame;
 
 class MediaResource extends JsonResource
 {
@@ -106,8 +108,13 @@ class MediaResource extends JsonResource
                     'story_music',
                 ]);
 
-                if (data_get($metadata, 'provider') === 'r2'
-                    && ! app(ReelsHlsRollout::class)->processingEnabled()) {
+                $hlsEnabledForMedia = match ($this->mediaable_type) {
+                    StoryFrame::class => (bool) config('media.stories_hls.enabled', false),
+                    Post::class => app(ReelsHlsRollout::class)->processingEnabled(),
+                    default => false,
+                };
+
+                if (data_get($metadata, 'provider') === 'r2' && ! $hlsEnabledForMedia) {
                     if (is_array($metadata['playback'] ?? null)) {
                         unset($metadata['playback']['hls']);
                     }
@@ -115,6 +122,7 @@ class MediaResource extends JsonResource
 
                 if (is_array($metadata['playback'] ?? null)) {
                     unset($metadata['playback']['hls_source_signature']);
+                    unset($metadata['playback']['hls_prefix']);
                 }
             }
 

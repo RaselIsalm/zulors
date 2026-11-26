@@ -4,13 +4,20 @@ namespace Tests\Feature;
 
 use App\Enums\Media\MediaStatus;
 use App\Enums\Media\MediaType;
+use App\Actions\Media\DeleteMediaAction;
 use App\Enums\Post\PostStatus;
 use App\Enums\Post\PostType;
+use App\Enums\Story\StoryPrivacy;
+use App\Enums\Story\StoryStatus;
+use App\Enums\Story\StoryType;
 use App\Enums\User\UserStatus;
 use App\Http\Resources\User\Media\MediaResource;
 use App\Jobs\User\Timeline\GeneratePostVideoHls;
+use App\Jobs\Media\DeleteVideoHlsAssets;
 use App\Models\Media;
 use App\Models\Post;
+use App\Models\Story;
+use App\Models\StoryFrame;
 use App\Models\User;
 use App\Services\Filesystem\Upload\VideoUploadService;
 use App\Services\Media\ReelsHlsRollout;
@@ -464,6 +471,199 @@ class ReelsHlsProcessingTest extends TestCase
         Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $second->id);
         Queue::assertNotPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $notSelected->id);
         Queue::assertNotPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool => $job->mediaId === (int) $alreadyProcessing->id);
+    }
+
+    public function test_story_hls_reconciliation_requires_the_flag_and_explicit_story_scope(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => false, 'media.stories_hls.enabled' => true]);
+        $story = Story::query()->create([
+            'story_uuid' => (string) Str::uuid(),
+            'user_id' => $this->user()->id,
+            'updated_at' => now(),
+        ]);
+        $frame = $story->frames()->create([
+            'status' => StoryStatus::ACTIVE,
+            'type' => StoryType::VIDEO,
+            'privacy' => StoryPrivacy::ALL,
+            'duration_seconds' => 10,
+            'meta' => [],
+        ]);
+        $media = $frame->media()->create([
+            'type' => MediaType::VIDEO,
+            'status' => MediaStatus::PROCESSED,
+            'source_path' => 'uploads/stories/videos/source.mp4',
+            'disk' => 'r2_final',
+            'mime' => 'video/mp4',
+            'extension' => 'mp4',
+            'size' => 100,
+            'metadata' => [
+                'provider' => 'r2',
+                'background_processing_state' => 'processed',
+                'playback_state' => 'ready',
+                'playback' => ['hls' => null, 'hls_state' => 'failed'],
+            ],
+        ]);
+
+        $this->artisan('media:reconcile-reel-hls', ['--missing-only' => true, '--limit' => 10])
+            ->expectsOutput('Reels HLS processing is disabled.')
+            ->assertSuccessful();
+        Queue::assertNothingPushed();
+
+        $this->artisan('media:reconcile-reel-hls', [
+            '--missing-only' => true,
+            '--include-stories' => true,
+            '--limit' => 10,
+        ])
+            ->expectsOutput('Requeued 1 video HLS job(s).')
+            ->assertSuccessful();
+
+        $this->assertSame('queued', data_get($media->fresh()->metadata, 'playback.hls_state'));
+        Queue::assertPushed(GeneratePostVideoHls::class, fn (GeneratePostVideoHls $job): bool =>
+            $job->mediaId === (int) $media->id
+        );
+    }
+
+    public function test_story_hls_job_writes_to_story_prefix_and_keeps_mp4_fallback(): void
+    {
+        $binary = (new \Symfony\Component\Process\ExecutableFinder())->find('ffmpeg');
+        if (! $binary) {
+            $this->markTestSkipped('FFmpeg is required for the Story HLS integration test.');
+        }
+
+        Event::fake();
+        Storage::fake('r2_final');
+        config([
+            'media.reels_hls.enabled' => false,
+            'media.stories_hls.enabled' => true,
+            'media.cache.control' => 'public, max-age=31536000, immutable',
+        ]);
+
+        $story = Story::query()->create([
+            'story_uuid' => (string) Str::uuid(),
+            'user_id' => $this->user()->id,
+            'updated_at' => now(),
+        ]);
+        $frame = $story->frames()->create([
+            'status' => StoryStatus::ACTIVE,
+            'type' => StoryType::VIDEO,
+            'privacy' => StoryPrivacy::ALL,
+            'duration_seconds' => 1,
+            'meta' => [],
+        ]);
+        $media = $frame->media()->create([
+            'type' => MediaType::VIDEO,
+            'status' => MediaStatus::PROCESSED,
+            'source_path' => 'uploads/stories/videos/source.mp4',
+            'disk' => 'r2_final',
+            'mime' => 'video/mp4',
+            'extension' => 'mp4',
+            'size' => 0,
+            'metadata' => [
+                'provider' => 'r2',
+                'playback_state' => 'ready',
+                'background_processing_state' => 'processed',
+                'original_storage' => [],
+            ],
+        ]);
+
+        $disk = Storage::disk('r2_final');
+        $disk->makeDirectory('uploads/stories/videos');
+        $sourceAbsolutePath = $disk->path($media->source_path);
+        (new \Symfony\Component\Process\Process([
+            $binary, '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=480x854:rate=24',
+            '-t', '1', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', $sourceAbsolutePath,
+        ]))->setTimeout(60)->mustRun();
+        $media->size = filesize($sourceAbsolutePath);
+        $media->save();
+
+        (new GeneratePostVideoHls((int) $media->id))->handle(app(VideoUploadService::class), app(ReelsHlsRollout::class));
+
+        $media->refresh();
+        $this->assertSame('ready', data_get($media->metadata, 'playback.hls_state'));
+        $this->assertSame('uploads/stories/videos/source.mp4', $media->source_path);
+        $signature = data_get($media->metadata, 'playback.hls_source_signature');
+        $disk->assertExists('uploads/stories/videos/'.$media->id.'/hls/'.$signature.'/master.m3u8');
+        $this->assertNotEmpty(data_get($media->metadata, 'playback.hls'));
+    }
+
+    public function test_deleting_video_queues_cleanup_for_its_validated_hls_directory(): void
+    {
+        Queue::fake();
+        Storage::fake('r2_final');
+        $post = $this->createPost($this->user());
+        $media = $this->video($post, [
+            'playback' => [
+                'hls' => 'https://media.example.test/master.m3u8',
+                'hls_state' => 'ready',
+                'hls_source_signature' => str_repeat('a', 24),
+            ],
+        ]);
+        $prefix = 'uploads/posts/videos/'.$media->id.'/hls/'.str_repeat('a', 24);
+        $metadata = $media->metadata;
+        $metadata['playback']['hls_prefix'] = $prefix;
+        $media->metadata = $metadata;
+        $media->save();
+        Storage::disk('r2_final')->put($prefix.'/master.m3u8', '#EXTM3U');
+
+        (new DeleteMediaAction($media))->execute();
+
+        Queue::assertPushed(DeleteVideoHlsAssets::class, fn (DeleteVideoHlsAssets $job): bool =>
+            $job->disk === 'r2_final'
+                && $job->prefix === $prefix
+                && $job->mediaableType === Post::class
+                && $job->mediaId === (int) $media->id
+        );
+
+        (new DeleteVideoHlsAssets('r2_final', $prefix, Post::class, (int) $media->id))->handle();
+        Storage::disk('r2_final')->assertMissing($prefix.'/master.m3u8');
+    }
+
+    public function test_story_hls_metadata_is_exposed_only_when_the_story_flag_is_enabled(): void
+    {
+        Storage::fake('r2_final');
+        config(['media.reels_hls.enabled' => false, 'media.stories_hls.enabled' => true]);
+        $story = Story::query()->create([
+            'story_uuid' => (string) Str::uuid(),
+            'user_id' => $this->user()->id,
+            'updated_at' => now(),
+        ]);
+        $frame = $story->frames()->create([
+            'status' => StoryStatus::ACTIVE,
+            'type' => StoryType::VIDEO,
+            'privacy' => StoryPrivacy::ALL,
+            'duration_seconds' => 10,
+            'meta' => [],
+        ]);
+        $media = $frame->media()->create([
+            'type' => MediaType::VIDEO,
+            'status' => MediaStatus::PROCESSED,
+            'source_path' => 'uploads/stories/videos/clip.mp4',
+            'disk' => 'r2_final',
+            'mime' => 'video/mp4',
+            'extension' => 'mp4',
+            'size' => 10,
+            'metadata' => [
+                'provider' => 'r2',
+                'playback_state' => 'ready',
+                'playback' => [
+                    'hls' => 'https://media.example.test/story/master.m3u8',
+                    'hls_prefix' => 'uploads/stories/videos/private/path',
+                    'hls_source_signature' => str_repeat('b', 24),
+                    'hls_state' => 'ready',
+                ],
+            ],
+        ]);
+
+        $resource = $this->resourceFor($media, $story->user);
+        $this->assertSame('https://media.example.test/story/master.m3u8', data_get($resource, 'metadata.playback.hls'));
+        $this->assertArrayNotHasKey('hls_prefix', $resource['metadata']['playback']);
+        $this->assertArrayNotHasKey('hls_source_signature', $resource['metadata']['playback']);
+
+        config(['media.stories_hls.enabled' => false]);
+        $disabledResource = $this->resourceFor($media, $story->user);
+        $this->assertArrayNotHasKey('hls', $disabledResource['metadata']['playback']);
     }
 
     public function test_missing_only_backfill_skips_ready_queued_and_processing_hls_rows(): void

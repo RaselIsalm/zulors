@@ -1,3 +1,1 @@
-export function shouldHydrateCachedProfileSnapshot(currentProfile, showLoader) {
-	return Boolean(showLoader || ! currentProfile?.id);
-}
+export { shouldHydrateCachedProfileSnapshot } from '../../../../kernel/services/cache/profile-cache.js';

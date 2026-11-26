@@ -5,6 +5,9 @@ namespace App\Actions\Media;
 use Throwable;
 use App\Models\Media;
 use App\Jobs\Media\DeleteCloudflareStreamVideo;
+use App\Jobs\Media\DeleteVideoHlsAssets;
+use App\Models\Post;
+use App\Models\StoryFrame;
 use App\Constants\Filesystem;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +25,7 @@ class DeleteMediaAction
 	{
 		try {
 			$streamUid = data_get($this->mediaData->metadata, 'stream.uid');
+			$hlsPrefix = $this->hlsPrefixForCleanup();
 
 			if($this->mediaData->disk !== Filesystem::EXTERNAL_DISK_NAME) {
 	
@@ -50,6 +54,14 @@ class DeleteMediaAction
 			}
 	
 			$this->mediaData->delete();
+			if ($hlsPrefix !== null && data_get($this->mediaData->metadata, 'provider') === 'r2') {
+				DeleteVideoHlsAssets::dispatch(
+					(string) $this->mediaData->disk,
+					$hlsPrefix,
+					(string) $this->mediaData->mediaable_type,
+					(int) $this->mediaData->id,
+				)->afterCommit();
+			}
 			if (filled($streamUid)) {
 				DeleteCloudflareStreamVideo::dispatch((string) $streamUid)->afterCommit();
 			}
@@ -59,6 +71,25 @@ class DeleteMediaAction
 				'id' => $this->mediaData->mediaable_id
 			]);
 		}
+	}
+
+	private function hlsPrefixForCleanup(): ?string
+	{
+		$base = match ((string) $this->mediaData->mediaable_type) {
+			Post::class => 'uploads/posts/videos',
+			StoryFrame::class => 'uploads/stories/videos',
+			default => null,
+		};
+		$signature = (string) data_get($this->mediaData->metadata, 'playback.hls_source_signature', '');
+
+		if ($base === null || ! preg_match('/\A[a-f0-9]{24}\z/', $signature)) {
+			return null;
+		}
+
+		$expected = $base.'/'.$this->mediaData->id.'/hls/'.$signature;
+		$stored = (string) data_get($this->mediaData->metadata, 'playback.hls_prefix', '');
+
+		return $stored === $expected ? $stored : $expected;
 	}
 
 	private function isAssetReferenced(string $disk, ?string $path): bool

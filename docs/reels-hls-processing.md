@@ -77,9 +77,15 @@ post data remains in the timeline store.
 MEDIA_REELS_HLS_ENABLED=true
 MEDIA_REELS_HLS_TIMEOUT_SECONDS=21600
 MEDIA_REELS_HLS_STALE_AFTER_MINUTES=120
+MEDIA_STORIES_HLS_ENABLED=false
 MEDIA_VIDEO_CANONICAL_READY_GLOBALLY=false
 MEDIA_VIDEO_CANONICAL_READY_USER_IDS=
 ```
+
+Story HLS generation is independently gated and disabled by default. In staging,
+enable `MEDIA_STORIES_HLS_ENABLED`, then verify HLS playback, poster retention,
+MP4 fallback, retry behavior, and queue capacity before enabling it in production.
+The scheduled reconciler includes Story video rows only while this flag is on.
 
 For post videos, set `MEDIA_VIDEO_CANONICAL_READY_USER_IDS` to a comma-separated
 owner-ID canary. Those owners' posts stay visible with their poster while the

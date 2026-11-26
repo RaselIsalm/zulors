@@ -15,6 +15,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use App\Jobs\User\Story\ExtractOriginalAudioFromMedia;
 use App\Jobs\Media\IngestR2VideoToCloudflareStream;
+use App\Jobs\User\Timeline\GeneratePostVideoHls;
 use App\Services\Filesystem\Delete\FileDeleteService;
 use App\Services\Filesystem\Upload\ImageUploadService;
 use App\Services\Filesystem\Upload\VideoUploadService;
@@ -167,6 +168,12 @@ class ProcessStoryVideo implements ShouldQueue
 
                 $this->deleteOriginalSource($oldDisk, $oldPath, $videoTempOldPath, $fileDeleteService, $frameMedia->id);
                 $fileDeleteService->setStorageDisk('local')->deleteFile($videoTempNewPath);
+
+                if((bool) config('media.stories_hls.enabled', false)
+                    && (string) data_get($frameMedia->metadata, 'provider') === 'r2') {
+                    GeneratePostVideoHls::dispatch((int) $frameMedia->id)
+                        ->onQueue(config('media.queues.video'));
+                }
 
                 $this->queueOriginalAudioExtraction($frameMedia);
             }
