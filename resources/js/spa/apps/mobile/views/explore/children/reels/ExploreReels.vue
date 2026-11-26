@@ -164,6 +164,34 @@
 				prefetchReelsPlaybackWindow(posts.value, activeIndex.value);
 			};
 
+			const reelsLifecycleKey = 'zulors.reels.lifecycle.v1';
+			const currentFeedKey = () => `${props.hash_id || 'default'}:${route.query.ad_id || ''}`;
+			const saveReelsPosition = () => {
+				const activePost = posts.value[activeIndex.value];
+				if(! activePost) return;
+
+				try {
+					window.localStorage.setItem(reelsLifecycleKey, JSON.stringify({
+						feedKey: currentFeedKey(),
+						postId: String(activePost.hash_id || activePost.id || ''),
+						index: activeIndex.value,
+						savedAt: Date.now(),
+					}));
+				}
+				catch(error) {}
+			};
+
+			const getSavedReelsPosition = () => {
+				try {
+					const saved = JSON.parse(window.localStorage.getItem(reelsLifecycleKey) || 'null');
+					if(! saved || saved.feedKey !== currentFeedKey() || Date.now() - Number(saved.savedAt || 0) > 1000 * 60 * 60 * 24) return null;
+					return saved;
+				}
+				catch(error) {
+					return null;
+				}
+			};
+
 			const updateActiveIndex = () => {
 				const scroller = scrollerRef.value;
 
@@ -182,6 +210,7 @@
 				}
 
 				activeIndex.value = nextIndex;
+				saveReelsPosition();
 				reelsStore.recordSwipe();
 				reelsStore.maybeRerankTail({
 					activeIndex: nextIndex
@@ -287,10 +316,16 @@
 
 					nextTick(() => {
 						if(scrollerRef.value) {
-							scrollerRef.value.scrollTop = 0;
+							const saved = getSavedReelsPosition();
+							const restoredIndex = saved
+								? Math.max(0, posts.value.findIndex((post) => String(post.hash_id || post.id || '') === saved.postId))
+								: 0;
+							activeIndex.value = restoredIndex;
+							scrollerRef.value.scrollTop = restoredIndex * scrollerRef.value.clientHeight;
 						}
 
 						updateActiveIndex();
+						saveReelsPosition();
 						warmPlaybackWindow();
 					});
 				}

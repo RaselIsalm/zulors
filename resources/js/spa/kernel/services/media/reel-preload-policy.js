@@ -15,7 +15,7 @@ const MIN_STARTUP_ESTIMATE = 500_000;
 export const REEL_STARTUP_BUFFER_SECONDS = 0.25;
 export const REEL_PREFETCH_BUFFER_SECONDS = 5;
 export const REEL_STARTUP_HD_WAIT_MS = 1_000;
-export const REEL_NEXT_BUFFER_SECONDS = 2;
+export const REEL_NEXT_BUFFER_SECONDS = 4;
 export const REEL_STALL_INDICATOR_DELAY_MS = 2_000;
 
 export function getRequiredStartupBufferSeconds(durationSeconds, currentTime = 0, targetSeconds = REEL_STARTUP_BUFFER_SECONDS) {
@@ -169,7 +169,7 @@ export function getReelPreloadPolicy({ active = false, isNext = false, distanceF
 		nextBufferSeconds: REEL_NEXT_BUFFER_SECONDS,
 		stallIndicatorDelayMs: REEL_STALL_INDICATOR_DELAY_MS,
 		autoLevelCapping: -1,
-		maxBufferLength: prewarmingNext ? 3 : Number(networkProfile.reelsMaxBufferLength || 16),
-		maxMaxBufferLength: prewarmingNext ? 3 : Number(networkProfile.reelsMaxMaxBufferLength || 24),
+		maxBufferLength: prewarmingNext ? 5 : Number(networkProfile.reelsMaxBufferLength || 16),
+		maxMaxBufferLength: prewarmingNext ? 5 : Number(networkProfile.reelsMaxMaxBufferLength || 24),
 	};
 }

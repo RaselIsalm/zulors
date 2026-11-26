@@ -39,6 +39,8 @@ function installAppLifecycleState(router, variant = 'web') {
     if(typeof window === 'undefined' || typeof document === 'undefined') return () => {};
 
     let disposed = false;
+    const handleVisibilityChange = () => document.hidden ? save() : restore();
+    const handleAppPause = () => save();
     const save = () => {
         if(! disposed) writeState({ ...captureState(router), variant });
     };
@@ -52,17 +54,35 @@ function installAppLifecycleState(router, variant = 'web') {
         });
     };
 
+    const rememberNativeRoute = (route) => {
+        const bridge = window.ZulorsStartup;
+        if(typeof bridge?.rememberSafeRoute !== 'function' || !route || !String(route).startsWith('/')) return;
+
+        try {
+            bridge.rememberSafeRoute(String(route));
+        }
+        catch(error) {
+            // Native route persistence is a startup optimization only.
+        }
+    };
+
     window.addEventListener('pagehide', save);
-    document.addEventListener('visibilitychange', () => document.hidden ? save() : restore());
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pageshow', restore);
     window.addEventListener('zulors:app-resume', restore);
-    router?.afterEach?.(() => window.requestIdleCallback?.(save) || window.setTimeout(save, 0));
+    window.addEventListener('zulors:app-pause', handleAppPause);
+    router?.afterEach?.((to) => {
+        rememberNativeRoute(to?.fullPath || router.currentRoute?.value?.fullPath);
+        window.requestIdleCallback?.(save) || window.setTimeout(save, 0);
+    });
 
     return () => {
         disposed = true;
         window.removeEventListener('pagehide', save);
         window.removeEventListener('pageshow', restore);
         window.removeEventListener('zulors:app-resume', restore);
+        window.removeEventListener('zulors:app-pause', handleAppPause);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
 }
 

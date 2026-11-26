@@ -1,5 +1,5 @@
 <template>
-	<div class="absolute inset-0 bg-black">
+	<div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-950 to-black">
 		<img
 			v-if="posterUrl"
 			v-bind:src="posterUrl"
@@ -333,9 +333,44 @@
 				return rememberedPosition;
 			};
 
+			const persistLifecyclePosition = () => {
+				const mediaId = String(props.mediaItem?.id || '');
+				const currentTime = Number(videoPlayerRef.value?.currentTime || state.playbackTime || 0);
+				if(! props.active || ! mediaId || ! Number.isFinite(currentTime) || currentTime < 0) return;
+
+				try {
+					window.localStorage.setItem('zulors.reel.lifecycle.v1', JSON.stringify({
+						mediaId,
+						currentTime,
+						savedAt: Date.now(),
+					}));
+				}
+				catch(error) {}
+			};
+
+			const restoreLifecyclePosition = () => {
+				try {
+					const saved = JSON.parse(window.localStorage.getItem('zulors.reel.lifecycle.v1') || 'null');
+					if(! saved || saved.mediaId !== String(props.mediaItem?.id || '') || Date.now() - Number(saved.savedAt || 0) > 1000 * 60 * 60 * 6) return 0;
+					const position = Number(saved.currentTime);
+					return Number.isFinite(position) && position >= 0 ? Math.round(position * 1000) / 1000 : 0;
+				}
+				catch(error) {
+					return 0;
+				}
+			};
+
+			const clearLifecyclePosition = () => {
+				try {
+					const saved = JSON.parse(window.localStorage.getItem('zulors.reel.lifecycle.v1') || 'null');
+					if(saved?.mediaId === String(props.mediaItem?.id || '')) window.localStorage.removeItem('zulors.reel.lifecycle.v1');
+				}
+				catch(error) {}
+			};
+
 			const applyRememberedResumePosition = ({ resetBelowThreshold = false } = {}) => {
 				const videoElement = videoPlayerRef.value;
-				const resumePosition = resumePositionForCurrentMedia();
+				const resumePosition = Math.max(resumePositionForCurrentMedia(), restoreLifecyclePosition());
 
 				state.resumePosition = resumePosition;
 
@@ -344,7 +379,7 @@
 				}
 
 				try {
-					if(resumePosition >= 30) {
+					if(resumePosition > 0.25) {
 						const duration = videoDurationSeconds();
 						videoElement.currentTime = duration > 0
 							? Math.min(resumePosition, Math.max(0, duration - 0.1))
@@ -601,6 +636,7 @@
 						}
 						catch(error) {}
 						state.resumePosition = 0;
+						clearLifecyclePosition();
 					}
 					syncProgress();
 					updatePlaybackReadiness();
@@ -1387,6 +1423,7 @@
 
 			const suspendPlaybackForLifecycle = () => {
 				persistResumePosition();
+				persistLifecyclePosition();
 				state.lifecycleSuspended = true;
 				pauseVideo();
 				hlsInstance?.stopLoad?.();
@@ -1405,6 +1442,7 @@
 				state.showRetry = false;
 				state.playRequested = true;
 				applyRememberedResumePosition();
+				clearLifecyclePosition();
 				syncPlaybackWindow();
 
 				nextTick(() => {
@@ -1432,6 +1470,7 @@
 			const handlePageHide = () => suspendPlaybackForLifecycle();
 			const handlePageShow = () => resumePlaybackAfterLifecycle();
 			const handleAppResume = () => resumePlaybackAfterLifecycle();
+			const handleAppPause = () => suspendPlaybackForLifecycle();
 
 			const releasePlaybackSource = () => {
 				persistResumePosition();
@@ -1550,12 +1589,16 @@
 
 			onMounted(() => {
 				wasPreviouslyActive = Boolean(props.active);
+				if(props.active) {
+					state.resumePosition = restoreLifecyclePosition();
+				}
 				setMuted();
 				document.addEventListener('visibilitychange', handleVisibilityChange);
 				window.addEventListener('pagehide', handlePageHide);
 				window.addEventListener('pageshow', handlePageShow);
 				window.addEventListener('focus', handlePageShow);
 				window.addEventListener('zulors:app-resume', handleAppResume);
+				window.addEventListener('zulors:app-pause', handleAppPause);
 				unsubscribeNetworkProfile = subscribeNetworkProfile((networkProfile) => {
 					state.networkProfile = networkProfile;
 				});
@@ -1577,6 +1620,7 @@
 				window.removeEventListener('pageshow', handlePageShow);
 				window.removeEventListener('focus', handlePageShow);
 				window.removeEventListener('zulors:app-resume', handleAppResume);
+				window.removeEventListener('zulors:app-pause', handleAppPause);
 
 				unsubscribeNetworkProfile?.();
 				pauseVideo({

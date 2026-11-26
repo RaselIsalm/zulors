@@ -400,7 +400,7 @@ public class MainActivity extends Activity {
 
         String requestedLaunchUrl = pendingLaunchUrlOverride != null
             ? pendingLaunchUrlOverride
-            : (hasLaunchUrl(getIntent()) ? resolveLaunchUrl(getIntent()) : null);
+            : (hasLaunchUrl(getIntent()) ? resolveLaunchUrl(getIntent()) : getCachedSafeRoute());
         pendingLaunchUrlOverride = null;
         boolean googleCallbackLaunch = requestedLaunchUrl != null
             && isGoogleCallbackUrl(Uri.parse(requestedLaunchUrl));
@@ -1451,7 +1451,7 @@ public class MainActivity extends Activity {
         String route = getSharedPreferences(STARTUP_PREFS, MODE_PRIVATE)
             .getString(PREF_LAST_SAFE_ROUTE, null);
 
-        if (route == null || !isTrustedWebUrl(Uri.parse(route))) {
+        if (route == null || !isSafeRouteUrl(route)) {
             return null;
         }
 
@@ -1459,9 +1459,53 @@ public class MainActivity extends Activity {
     }
 
     private void rememberSafeRoute(String url) {
-        // Sub-page persistence is intentionally disabled. Cold starts always
-        // begin at BuildConfig.APP_URL; only explicit notification intents
-        // may open a deep link.
+        if (!isSafeRouteUrl(url)) {
+            return;
+        }
+
+        getSharedPreferences(STARTUP_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(PREF_LAST_SAFE_ROUTE, url)
+            .apply();
+    }
+
+    private boolean isSafeRouteUrl(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return false;
+        }
+
+        try {
+            Uri route = Uri.parse(value.trim());
+            Uri resolved;
+            if (route.getScheme() == null && route.getHost() == null) {
+                String path = route.getEncodedPath();
+                if (path == null || !path.startsWith("/") || path.startsWith("//") || path.contains("\\")) {
+                    return false;
+                }
+                Uri base = Uri.parse(BuildConfig.APP_URL);
+                resolved = base.buildUpon()
+                    .encodedPath(path)
+                    .encodedQuery(route.getEncodedQuery())
+                    .encodedFragment(route.getEncodedFragment())
+                    .build();
+            }
+            else {
+                resolved = route;
+            }
+
+            if (!isTrustedWebUrl(resolved)) {
+                return false;
+            }
+
+            String path = resolved.getPath() == null ? "" : resolved.getPath().toLowerCase(java.util.Locale.ROOT);
+            return !path.startsWith("/auth/")
+                && !path.startsWith("/oauth/")
+                && !path.equals("/login")
+                && !path.equals("/register");
+        }
+        catch (Exception exception) {
+            return false;
+        }
     }
 
     private boolean hasLaunchUrl(Intent intent) {
@@ -2824,6 +2868,11 @@ public class MainActivity extends Activity {
 
     private final class StartupBridge {
         @JavascriptInterface
+        public void rememberSafeRoute(String route) {
+            MainActivity.this.rememberSafeRoute(route);
+        }
+
+        @JavascriptInterface
         public String performanceContext() {
             JSONObject context = new JSONObject();
             ActivityManager activityManager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
@@ -3348,12 +3397,30 @@ public class MainActivity extends Activity {
             else if (shouldHandleNotificationLaunch(launchUrl)) {
                 startupNotificationHomeFallback = StartupNavigationPolicy
                     .hasHomeFallback(BuildConfig.APP_URL, launchUrl);
-                webView.loadUrl(launchUrl, noCacheHeaders());
+                navigateToNotificationTarget(launchUrl);
             }
         }
 
         clearZulorsNotifications();
         PushTokenBridge.syncLatestToken(this, webView);
+    }
+
+    private void navigateToNotificationTarget(final String launchUrl) {
+        if (webView == null || !isTrustedWebUrl(Uri.parse(launchUrl))) {
+            return;
+        }
+
+        webView.evaluateJavascript(
+            "(function(){var navigate=window.__zulorsNavigateToNotificationTarget;return typeof navigate==='function'&&navigate(" + JSONObject.quote(launchUrl) + ");})()",
+            new ValueCallback<String>() {
+                @Override
+                public void onReceiveValue(String result) {
+                    if (!"true".equals(result) && webView != null) {
+                        webView.loadUrl(launchUrl, noCacheHeaders());
+                    }
+                }
+            }
+        );
     }
 
     private boolean shouldHandleNotificationLaunch(String url) {
@@ -3638,6 +3705,10 @@ public class MainActivity extends Activity {
         }
 
         if (webView != null) {
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('zulors:app-pause'));",
+                null
+            );
             webView.onPause();
         }
 

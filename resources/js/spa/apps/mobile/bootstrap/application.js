@@ -111,6 +111,18 @@ Application.config.globalProperties.$t = translate;
 installNativeBackBridge(Router);
 installAppLifecycleState(Router, 'mobile');
 
+window.__zulorsNavigateToNotificationTarget = (rawUrl) => {
+	try {
+		const target = new URL(String(rawUrl || ''), window.location.origin);
+		if(target.origin !== window.location.origin || !target.pathname.startsWith('/')) return false;
+		Router.push(`${target.pathname}${target.search}${target.hash}`);
+		return true;
+	}
+	catch(error) {
+		return false;
+	}
+};
+
 Application.component('Border', defineAsyncComponent(() => {
     return import("@/kernel/vue/components/general/Border.vue");
 }));
