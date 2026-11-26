@@ -94,7 +94,7 @@
 
 			const openEditor = () => {
 				if(! storiesEditorStore.creativeEditorEnabled) {
-					toastError('Editing is currently unavailable. You can still publish your original photo or video.');
+					toastSuccess('Coming soon — story editing is being set up. You can publish the original photo or video now.');
 					return;
 				}
 				if(isVideo.value && mobileBrowserPattern.test(navigator.userAgent || '')) {
