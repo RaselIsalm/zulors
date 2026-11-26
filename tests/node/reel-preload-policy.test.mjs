@@ -26,11 +26,11 @@ test('the next reel preloads one network-appropriate segment then keeps its buff
         preferredShortEdge: 720,
 		startupBufferSeconds: 0.25,
 		startupHdWaitMs: 1_000,
-        nextBufferSeconds: 2,
+        nextBufferSeconds: 4,
         stallIndicatorDelayMs: 2_000,
         autoLevelCapping: -1,
-        maxBufferLength: 3,
-        maxMaxBufferLength: 3,
+        maxBufferLength: 5,
+        maxMaxBufferLength: 5,
     });
 });
 
