@@ -221,6 +221,7 @@
 				watchMsSinceFlush: 0,
 				totalWatchMs: 0,
 				lastPlaybackTime: 0,
+				stallStartedAt: 0,
 				presentationMetadata: {},
 				loopCount: 0,
 				sessionId: `video-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -598,6 +599,13 @@
 
 			const handleVideoPlaying = () => {
 				const recovered = state.isBuffering && state.hasStartedPlayback;
+				if(state.stallStartedAt > 0) {
+					queueMetric('media_stall_duration', Math.min(600000, Math.max(0, performance.now() - state.stallStartedAt)), {
+						category: 'feed',
+						rendition: playbackController?.getHlsInstance?.() ? 'hls' : 'mp4'
+					});
+					state.stallStartedAt = 0;
+				}
 				state.isPlaying = true;
 				state.hasStartedPlayback = true;
 				state.showBufferIndicator = false;
@@ -615,6 +623,7 @@
 				}
 
 				state.isBuffering = true;
+				state.stallStartedAt = performance.now();
 				queueMetric('media_stall', 1, { category: 'feed', rendition: playbackController?.getHlsInstance?.() ? 'hls' : 'mp4' });
 				showBufferingAfterGrace();
 			};

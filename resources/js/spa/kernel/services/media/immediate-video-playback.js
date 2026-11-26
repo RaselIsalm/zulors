@@ -25,6 +25,16 @@ export function canPlayVideoImmediately(item = {}) {
 		return false;
 	}
 
+	if(item.playback_ready === false) {
+		return false;
+	}
+
+	if(item.metadata?.playback_readiness === 'canonical_mp4') {
+		return item.metadata?.playback_state === 'ready'
+			&& item.metadata?.processing_mode === 'optimized_mp4'
+			&& Boolean(item.source_url || item.playback_url || item.metadata?.playback?.hls);
+	}
+
 	if(item.playback_ready === true || item.metadata?.playback_state === 'ready' || item.status === 'processed') {
 		return true;
 	}

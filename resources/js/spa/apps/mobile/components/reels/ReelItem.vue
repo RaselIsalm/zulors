@@ -22,8 +22,10 @@
 			v-on:handoff-ready="clearPlaybackHandoff"
 		></ReelVideoPlayer>
 
-		<div v-else class="absolute inset-0 bg-black inline-flex-center">
-			<div class="max-w-56 px-5 text-center">
+		<div v-else class="absolute inset-0 bg-black inline-flex-center overflow-hidden">
+			<img v-if="mediaItem.thumbnail_url || mediaItem.poster_url || mediaItem.lqip_base64" v-bind:src="mediaItem.thumbnail_url || mediaItem.poster_url || mediaItem.lqip_base64" alt="" class="absolute inset-0 size-full object-contain opacity-50">
+			<div class="absolute inset-0 bg-black/35"></div>
+			<div class="relative z-10 max-w-56 px-5 text-center">
 				<div class="mx-auto mb-4 size-12 rounded-full bg-white/10 inline-flex-center text-white/80">
 					<SvgIcon name="video-recorder" type="line" classes="size-6"></SvgIcon>
 				</div>
@@ -403,6 +405,10 @@
 					return formatCount(reactionCount.value);
 				}),
 				fallbackText: computed(() => {
+					if(mediaItem.value?.metadata?.playback_state === 'failed' || mediaItem.value?.metadata?.processing_state === 'failed') {
+						return __t('labels.video_processing_failed');
+					}
+
 					return __t('labels.video_processing');
 				}),
 				canReportPost: computed(() => {

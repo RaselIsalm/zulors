@@ -207,6 +207,7 @@ class TimelineDataIntegrityTest extends TestCase
             'metadata' => [
                 'provider' => 'r2',
                 'upload_state' => 'uploaded',
+                'playback_readiness' => 'canonical_mp4',
                 'processing_mode' => 'original_direct',
                 'final_disk' => 'r2_final',
                 'original_size' => $original['size'],
@@ -220,6 +221,7 @@ class TimelineDataIntegrityTest extends TestCase
         $this->assertSame(MediaStatus::PROCESSED, $media->status);
         $this->assertSame('r2', data_get($media->metadata, 'provider'));
         $this->assertSame('optimized_mp4', data_get($media->metadata, 'processing_mode'));
+        $this->assertSame('ready', data_get($media->metadata, 'playback_state'));
         $this->assertNotEmpty(data_get($media->metadata, 'processed_at'));
         $this->assertSame('video/mp4', $media->mime);
         $finalDisk->assertMissing($publishedPath);
@@ -1012,7 +1014,7 @@ class TimelineDataIntegrityTest extends TestCase
         );
     }
 
-    public function test_legacy_final_bucket_direct_video_upload_publishes_original_without_transcoding(): void
+    public function test_canary_final_bucket_direct_video_upload_publishes_but_hides_original_until_canonical_playback(): void
     {
         \Illuminate\Support\Facades\Bus::fake();
         config([
@@ -1025,6 +1027,7 @@ class TimelineDataIntegrityTest extends TestCase
         ]);
 
         $author = $this->createUser('direct-final-video-author');
+        config(['media.video_playback.canonical_ready_user_ids' => [(string) $author->id]]);
         $post = $this->createPost($author, 'Direct final video', null, [
             'status' => PostStatus::PROCESSING_VIDEO,
             'type' => PostType::VIDEO,
@@ -1092,9 +1095,12 @@ class TimelineDataIntegrityTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.media.status', MediaStatus::PROCESSED->value)
             ->assertJsonPath('data.media.metadata.provider', 'r2')
-            ->assertJsonPath('data.media.metadata.processing_state', 'processed')
+            ->assertJsonPath('data.media.metadata.processing_state', 'queued')
+            ->assertJsonPath('data.media.metadata.playback_state', 'processing')
+            ->assertJsonPath('data.media.metadata.playback_readiness', 'canonical_mp4')
             ->assertJsonPath('data.media.metadata.processing_mode', 'original_direct')
-            ->assertJsonPath('data.media.source_url', '/storage/direct-final-media/uploads/posts/videos/direct-final.mp4');
+            ->assertJsonPath('data.media.playback_ready', false)
+            ->assertJsonPath('data.media.source_url', null);
 
         $post->refresh();
         $media->refresh();
@@ -1103,7 +1109,8 @@ class TimelineDataIntegrityTest extends TestCase
         $this->assertSame(MediaStatus::PROCESSED, $media->status);
         $this->assertSame('r2_final', $media->disk);
         $this->assertSame('uploads/posts/videos/direct-final.mp4', $media->source_path);
-        $this->assertSame(100, data_get($media->metadata, 'processing_progress'));
+        $this->assertSame(0, data_get($media->metadata, 'processing_progress'));
+        $this->assertNull($media->source_url);
 
         Event::assertDispatched(MediaUpdatedEvent::class);
         Event::assertNotDispatched(MediaProcessedEvent::class);

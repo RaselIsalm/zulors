@@ -19,6 +19,10 @@ return [
     'processing' => [
         'ffmpeg_threads' => (int) env('MEDIA_FFMPEG_THREADS', 2),
     ],
+    'video_playback' => [
+        'canonical_ready_globally' => (bool) env('MEDIA_VIDEO_CANONICAL_READY_GLOBALLY', false),
+        'canonical_ready_user_ids' => array_values(array_filter(explode(',', (string) env('MEDIA_VIDEO_CANONICAL_READY_USER_IDS', '')))),
+    ],
     'queues' => [
         'video' => env('MEDIA_VIDEO_QUEUE', env('MEDIA_VIDEO_NORMAL_QUEUE', 'media-video-normal')),
         'video_high' => env('MEDIA_VIDEO_HIGH_QUEUE', 'media-video-high'),

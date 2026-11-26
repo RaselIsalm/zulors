@@ -262,7 +262,7 @@ class DirectMediaUploadController extends Controller
 
         if($publishedR2Retry || (in_array($provider, ['r2_temp', 'r2_direct'], true) && data_get($metadata, 'upload_state') === 'uploaded')) {
             if(! $media->status->isProcessed()) {
-                $media = $this->publishCompletedR2Video($media, $metadata, $r2DirectUploadService, (int) data_get($metadata, 'original_size', $media->size));
+                $media = $this->publishCompletedR2Video($media, $metadata, $r2DirectUploadService, (int) data_get($metadata, 'original_size', $media->size), $request->user()?->id);
                 $this->broadcastMediaUpdated($media);
             }
 
@@ -328,7 +328,7 @@ class DirectMediaUploadController extends Controller
             ]);
             unset($nextMetadata['processed_at'], $nextMetadata['processing_fallback']);
 
-            $media = $this->publishCompletedR2Video($media, $nextMetadata, $r2DirectUploadService, $originalSize ?: (int) $media->size);
+            $media = $this->publishCompletedR2Video($media, $nextMetadata, $r2DirectUploadService, $originalSize ?: (int) $media->size, $request->user()?->id);
 
             $this->broadcastMediaUpdated($media);
 
@@ -361,7 +361,7 @@ class DirectMediaUploadController extends Controller
         ]);
     }
 
-    private function publishCompletedR2Video(Media $media, array $metadata, R2DirectUploadService $r2DirectUploadService, int $originalSize): Media
+    private function publishCompletedR2Video(Media $media, array $metadata, R2DirectUploadService $r2DirectUploadService, int $originalSize, int|string|null $ownerId): Media
     {
         $now = now()->toIso8601String();
         $temporaryPath = $media->source_path;
@@ -379,15 +379,17 @@ class DirectMediaUploadController extends Controller
         $media->disk = $published['disk'];
         $media->size = (int) $published['video_size'];
 
+        $canonicalPlaybackRequired = app(\App\Services\Media\CanonicalVideoPlaybackPolicy::class)->enabledForUser($ownerId);
+        $metadata = app(\App\Services\Media\CanonicalVideoPlaybackPolicy::class)->applyTo($metadata, $ownerId);
         $nextMetadata = array_merge($metadata, [
             'provider' => 'r2',
             'upload_state' => 'uploaded',
             'upload_progress' => 100,
             'upload_completed_at' => data_get($metadata, 'upload_completed_at', $now),
-            'processing_state' => 'processed',
-            'processing_progress' => 100,
+            'processing_state' => $canonicalPlaybackRequired ? 'queued' : 'processed',
+            'processing_progress' => $canonicalPlaybackRequired ? 0 : 100,
             'processing_updated_at' => $now,
-            'playback_state' => 'ready',
+            'playback_state' => $canonicalPlaybackRequired ? 'processing' : 'ready',
             'background_processing_state' => 'queued',
             'background_processing_progress' => 0,
             'background_processing_updated_at' => $now,

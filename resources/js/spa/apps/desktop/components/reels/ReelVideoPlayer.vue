@@ -192,6 +192,7 @@
 				networkProfile: getNetworkProfileSnapshot(),
 				nativeVideoUrl: '',
 				stallCount: 0,
+				stallStartedAt: 0,
 				retryCount: 0,
 				resumePosition: 0,
 				lastReportedRendition: '',
@@ -1076,6 +1077,12 @@
 			};
 
 				const handlePlaying = () => {
+					if(state.stallStartedAt > 0) {
+						recordPlaybackMetric('media_stall_duration', Math.min(600000, Math.max(0, performance.now() - state.stallStartedAt)), {
+							rendition: hlsInstance ? 'hls' : 'mp4'
+						});
+						state.stallStartedAt = 0;
+					}
 					const recoveredFromStall = state.isBuffering && state.retryCount > 0;
 					if(recoveredFromStall) {
 						recordPlaybackMetric('media_recovery', state.retryCount, {
@@ -1123,6 +1130,7 @@
 
 				if(! state.isBuffering) {
 					state.stallCount += 1;
+					state.stallStartedAt = performance.now();
 					recordPlaybackMetric('media_stall', 1, {
 						rendition: hlsInstance ? 'hls' : 'mp4'
 					});

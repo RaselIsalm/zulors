@@ -21,6 +21,14 @@ manifest and segments to R2. An opt-in allowlisted Cloudflare Stream pilot can
 copy the finished R2 object for managed HLS; the Stream URL is selected only
 after its signed ready webhook. R2 MP4/HLS stays available as fallback.
 
+During the canonical-playback canary, the post stays published but its raw upload
+is not exposed as a playback URL to canary owners' viewers. Playback becomes
+ready after the generated H.264/yuv420p MP4 passes FFprobe validation; HLS remains
+an optional later enhancement. Configure `MEDIA_VIDEO_CANONICAL_READY_USER_IDS`
+for the owner canary, then enable `MEDIA_VIDEO_CANONICAL_READY_GLOBALLY=true`
+only after playback metrics and Android WebView checks pass. See
+[Reels HLS processing](reels-hls-processing.md).
+
 The upload button starts the R2 transfer without a video-encoding preparation step. Poster extraction is a bounded local preview-only step. The
 browser persists part ETags for retry/resume, and repeat create/complete requests
 reuse the same publication or media identity. Completed R2 objects are verified

@@ -73,4 +73,29 @@ class PerformanceTelemetryTest extends TestCase
             ]],
         ])->assertNoContent();
     }
+
+    public function test_stall_duration_metric_is_accepted_with_coarse_transport_context(): void
+    {
+        $logger = \Mockery::mock();
+        $logger->shouldReceive('info')
+            ->once()
+            ->with('client_performance_batch', \Mockery::on(function (array $context): bool {
+                $event = $context['events'][0] ?? [];
+                return ($event['metric'] ?? null) === 'media_stall_duration'
+                    && ($event['rendition'] ?? null) === 'hls'
+                    && ! array_key_exists('media_id', $event)
+                    && ! array_key_exists('url', $event);
+            }));
+
+        Log::shouldReceive('channel')->once()->with('performance')->andReturn($logger);
+
+        $this->postJson('/api/performance/events', [
+            'events' => [[
+                'metric' => 'media_stall_duration',
+                'value' => 1350,
+                'category' => 'explore',
+                'rendition' => 'hls',
+            ]],
+        ])->assertNoContent();
+    }
 }

@@ -23,6 +23,7 @@ class PerformanceTelemetryController extends Controller
         'upload_start',
         'media_play_request',
         'media_stall',
+        'media_stall_duration',
         'media_recovery',
         'media_fallback',
         'media_terminal_error',

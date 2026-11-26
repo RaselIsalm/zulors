@@ -3,6 +3,7 @@
 namespace App\Jobs\User\Timeline;
 
 use Exception;
+use RuntimeException;
 use App\Models\Post;
 use App\Constants\Filesystem;
 use FFMpeg\Coordinate\Dimension;
@@ -144,6 +145,10 @@ class ConvertAndCompressPostVideo implements ShouldQueue
             $video->save($format, $videoNewAbsLocalPath);
 
             if(file_exists($videoNewAbsLocalPath)) {
+                if (app(\App\Services\Media\CanonicalVideoPlaybackPolicy::class)->requiredFor($postMedia)) {
+                    $this->assertCanonicalPlaybackOutput($videoUploadService, $videoNewAbsLocalPath);
+                }
+
                 $targetDisk = $this->targetStorageDisk($postMedia);
                 $videoPresentationMetadata = $this->videoPresentationMetadata($videoUploadService, $videoNewAbsLocalPath);
                 $oldDisk = $postMedia->disk;
@@ -267,6 +272,23 @@ class ConvertAndCompressPostVideo implements ShouldQueue
     {
         $postMedia = $this->postData->media()->first();
         if (! $postMedia) {
+            return;
+        }
+
+        if ($postMedia->type->isVideo()
+            && app(\App\Services\Media\CanonicalVideoPlaybackPolicy::class)->requiredFor($postMedia)
+            && data_get($postMedia->metadata, 'processing_mode') !== 'optimized_mp4') {
+            $metadata = $postMedia->metadata ?? [];
+            $metadata['playback_state'] = 'failed';
+            $metadata['processing_state'] = 'failed';
+            $metadata['background_processing_state'] = 'failed';
+            $metadata['processing_error'] = 'Canonical video processing failed. Raw upload is retained for retry.';
+            $metadata['background_processing_error'] = 'Canonical video processing failed.';
+            $metadata['processing_updated_at'] = now()->toIso8601String();
+            $postMedia->metadata = $metadata;
+            $postMedia->save();
+            $this->broadcastMediaUpdated($postMedia);
+
             return;
         }
 
@@ -395,7 +417,9 @@ class ConvertAndCompressPostVideo implements ShouldQueue
         if($state === 'failed') {
             $metadata['playback_state'] = 'failed';
             if($this->isInstantR2MediaAwaitingOptimization($postMedia)) {
-                $metadata['processing_error'] = 'Background video optimization failed. Raw playback remains available.';
+                $metadata['processing_error'] = app(\App\Services\Media\CanonicalVideoPlaybackPolicy::class)->requiredFor($postMedia)
+                    ? 'Background video optimization failed. Raw upload is retained for retry.'
+                    : 'Background video optimization failed. Raw playback remains available.';
             }
             else {
                 $postMedia->status = MediaStatus::FAILED;
@@ -432,6 +456,25 @@ class ConvertAndCompressPostVideo implements ShouldQueue
             && $this->isRemoteR2Source($postMedia)
             && data_get($metadata, 'upload_state') === 'uploaded'
             && blank(data_get($metadata, 'processed_at'));
+    }
+
+    private function assertCanonicalPlaybackOutput(VideoUploadService $videoUploadService, string $absolutePath): void
+    {
+        $probe = $videoUploadService->getFFProbe();
+        $format = $probe->format($absolutePath);
+        $duration = (float) $format->get('duration');
+        $video = $probe->streams($absolutePath)->videos()->first();
+
+        if ($duration <= 0 || ! $video
+            || strtolower((string) $video->get('codec_name')) !== 'h264'
+            || strtolower((string) $video->get('pix_fmt')) !== 'yuv420p') {
+            throw new RuntimeException('Canonical playback output failed codec or duration verification.');
+        }
+
+        $audio = $probe->streams($absolutePath)->audios()->first();
+        if ($audio && strtolower((string) $audio->get('codec_name')) !== 'aac') {
+            throw new RuntimeException('Canonical playback output contains an unsupported audio codec.');
+        }
     }
 
     private function isRemoteR2Source($postMedia): bool

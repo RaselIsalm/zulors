@@ -128,6 +128,10 @@ class PublicationFinalizer
 
                     if ($needsCanonicalVideo) {
                         $metadata = $media->metadata ?? [];
+                        if ($entity instanceof Post) {
+                            $metadata = app(\App\Services\Media\CanonicalVideoPlaybackPolicy::class)
+                                ->applyTo($metadata, $actor->id);
+                        }
                         $hlsEnabled = (bool) config('media.reels_hls.enabled', false);
                         $metadata['playback_state'] = 'processing';
                         $metadata['processing_state'] = 'queued';

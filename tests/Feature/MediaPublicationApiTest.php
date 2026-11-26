@@ -571,6 +571,26 @@ class MediaPublicationApiTest extends TestCase
         Storage::disk('r2_final')->assertExists($publication->items[0]->refresh()->output['source_path']);
     }
 
+    public function test_canary_post_is_published_with_poster_but_not_playable_until_canonical_mp4_is_ready(): void
+    {
+        $owner = $this->createUser();
+        $this->actingAs($owner);
+        config(['media.video_playback.canonical_ready_user_ids' => [(string) $owner->id]]);
+        $publication = $this->createPublication($this->payload('post', 'video'));
+        $session = $this->startUpload($publication);
+        Storage::disk('r2_temp')->put($session['upload']['path'], str_repeat('v', 24));
+
+        $this->postJson($this->itemUrl($publication, 'complete'), ['generation' => $session['generation'], 'parts' => []])
+            ->assertOk()->assertJsonPath('data.status', 'published');
+
+        $media = \App\Models\Media::query()->firstOrFail();
+        $this->assertSame('canonical_mp4', data_get($media->metadata, 'playback_readiness'));
+        $this->assertSame('processing', data_get($media->metadata, 'playback_state'));
+        $this->assertNull($media->source_url);
+        $this->assertFalse(\App\Http\Resources\User\Media\MediaResource::make($media)->resolve()['playback_ready']);
+        Bus::assertDispatched(ConvertAndCompressPostVideo::class);
+    }
+
     public function test_multipart_completion_uses_only_the_owned_session_and_publishes_once(): void
     {
         $this->actingAs($this->createUser());

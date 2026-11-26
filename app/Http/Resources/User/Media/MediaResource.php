@@ -6,12 +6,15 @@ use Illuminate\Support\Arr;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use App\Services\Media\ReelsHlsRollout;
+use App\Services\Media\CanonicalVideoPlaybackPolicy;
 
 class MediaResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
         $sourceUrl = $this->source_url;
+        $canonicalPlaybackPolicy = app(CanonicalVideoPlaybackPolicy::class);
+        $canonicalPlaybackRequired = $this->type->isVideo() && $canonicalPlaybackPolicy->requiredFor($this->resource);
 
         $mediaItem = [
             'id' => $this->id,
@@ -19,8 +22,10 @@ class MediaResource extends JsonResource
             'source_url' => $sourceUrl,
             'playback_ready' => $this->type->isVideo()
                 && filled($sourceUrl)
-                && (data_get($this->metadata, 'playback_state', 'ready') === 'ready'
-                    || $this->hasCanonicalDirectPlayback()),
+                && ($canonicalPlaybackRequired
+                    ? $canonicalPlaybackPolicy->isReady($this->resource)
+                    : (data_get($this->metadata, 'playback_state', 'ready') === 'ready'
+                        || $this->hasCanonicalDirectPlayback())),
             'playback_mode' => $this->type->isVideo() && data_get($this->metadata, 'provider') === 'r2' ? 'r2_direct' : null,
             'preview_url' => $this->getPreviewUrl(),
             'extension' => $this->extension,
@@ -84,6 +89,7 @@ class MediaResource extends JsonResource
                     'processing_error',
                     'processing_fallback',
                     'playback_state',
+                    'playback_readiness',
                     'background_processing_state',
                     'background_processing_progress',
                     'background_processing_updated_at',

@@ -77,7 +77,18 @@ post data remains in the timeline store.
 MEDIA_REELS_HLS_ENABLED=true
 MEDIA_REELS_HLS_TIMEOUT_SECONDS=21600
 MEDIA_REELS_HLS_STALE_AFTER_MINUTES=120
+MEDIA_VIDEO_CANONICAL_READY_GLOBALLY=false
+MEDIA_VIDEO_CANONICAL_READY_USER_IDS=
 ```
+
+For post videos, set `MEDIA_VIDEO_CANONICAL_READY_USER_IDS` to a comma-separated
+owner-ID canary. Those owners' posts stay visible with their poster while the
+verified H.264/yuv420p MP4 is encoded; playback starts only after the canonical
+MP4 passes FFprobe checks. Once the mobile WebView canary and production stall
+metrics pass, set `MEDIA_VIDEO_CANONICAL_READY_GLOBALLY=true`. The global policy
+applies to R2 post videos; stories and other media types keep their own pipeline.
+Clear the canary list after global activation. Keep the original R2 object for
+retry/reprocessing; do not expose it as a fallback when strict processing fails.
 
 The Redis `retry_after` value is derived to exceed the HLS job timeout by five
 minutes. Keep that margin if the timeout is changed so Redis cannot reserve a
@@ -136,7 +147,7 @@ rendition and terminal playback failures. Those events contain only route,
 client variant and coarse network/device classes; they do not include media
 URLs or user, post, media or persistent device IDs.
 
-Monitor first-frame duration, stall and recovery rates, processing queue age,
+Monitor first-frame duration, stall count and duration, recovery rates, processing queue age,
 HLS rendition readiness and MP4 fallback rate after rollout. Encoding increases
 worker CPU use and adds HLS objects to R2 storage; each newly processed video
 also retains its original upload, increasing storage use.

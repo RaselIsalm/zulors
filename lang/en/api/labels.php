@@ -55,6 +55,7 @@ return [
 	'info' => 'Info',
 	'more' => 'More',
 	'video_processing' => 'Video is being processed',
+	'video_processing_failed' => 'Video processing failed. Please try again later.',
 	'audio_processing' => 'Audio is being processed',
 	'create' => 'Create',
 	'create_labels' => [
