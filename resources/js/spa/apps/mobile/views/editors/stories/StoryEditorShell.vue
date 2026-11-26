@@ -37,19 +37,9 @@
 			});
 
 			const activateLegacyFallback = async (error) => {
-				if(! storiesEditorStore.legacyEditorFallbackEnabled) {
-					toastError(error?.message || 'Creative editor is unavailable.');
-					return;
-				}
-
-				try {
-					legacyFallbackActive.value = true;
-					toastError('Creative editor is unavailable. Opening the standard story editor.');
-					await storiesEditorStore.uploadCreativeDraftWithLegacy();
-				} catch (fallbackError) {
-					toastError(fallbackError.message);
-					storiesEditorStore.resetEditor();
-				}
+				legacyFallbackActive.value = false;
+				storiesEditorStore.closeCreativeEditor();
+				if(error?.message) toastError(error.message);
 			};
 
 			return {

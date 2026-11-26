@@ -57,6 +57,7 @@ async function saveStoryEditorDraft(draft) {
 			clipCandidate: draft.clipCandidate || null,
 			legacyUploadOptions: draft.legacyUploadOptions || {},
 			exportMetadata: draft.exportMetadata || {},
+			scene: draft.scene || null,
 			edited: Boolean(draft.edited),
 			selectedMusicTrack: draft.selectedMusicTrack || null,
 			musicBaked: Boolean(draft.musicBaked),

@@ -46,12 +46,11 @@
 				<p class="text-par-m font-semibold text-white">Creative editor could not start</p>
 				<p class="mt-2 max-w-xs text-center text-par-s text-white/70">{{ editorError }}</p>
 				<button
-					v-if="legacyFallbackEnabled"
 					type="button"
 					class="mt-5 inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 text-par-s font-semibold text-black"
 					v-on:click="useLegacyEditor"
 				>
-					Use standard editor
+					Back to preview
 				</button>
 			</div>
 		</div>
@@ -351,7 +350,9 @@
 				cesdk.i18n.setLocale('en');
 				await addPlugins(cesdk);
 
-				if(draft.value.type === 'video') {
+				if(draft.value.scene) {
+					await cesdk.engine.scene.loadFromString(draft.value.scene);
+				} else if(draft.value.type === 'video') {
 					await cesdk.createFromVideo(draft.value.objectUrl);
 					cesdk.engine.scene.setMode('Video');
 				} else {
@@ -429,7 +430,7 @@
 					};
 				}
 
-				const outputMime = draft.value.mime === 'image/png' ? 'image/png' : 'image/jpeg';
+				const outputMime = 'image/jpeg';
 				const blob = await cesdk.engine.block.export(page, {
 					mimeType: outputMime,
 					targetWidth: STORY_WIDTH,
@@ -459,6 +460,7 @@
 					exportProgress.value = 0;
 					busyLabel.value = 'Exporting';
 
+					const scene = await instance.value.engine.scene.saveToString();
 					const exported = await exportMedia();
 					const filename = `zulors-story-${Date.now()}.${exported.extension}`;
 					const file = new File([exported.blob], filename, {
@@ -474,10 +476,10 @@
 						editor_export_width: exported.width,
 						editor_export_height: exported.height,
 						editor_export_fps: exported.fps || '',
-							editor_export_source_mime: draft.value.mime
+						editor_export_source_mime: draft.value.mime
 						};
 
-						storiesEditorStore.applyCreativeExport(file, exportMetadata);
+					storiesEditorStore.applyCreativeExport(file, exportMetadata, scene);
 						toastSuccess('Edits saved');
 				} catch (error) {
 					if(/cannot export videos|browser/i.test(errorMessage(error))) {

@@ -182,6 +182,7 @@
 	import { durationObjectToSeconds, durationSecondsToObject } from '@/kernel/helpers/media/audio/index.js';
 	import PublicationAudience from '@/kernel/vue/components/media/publications/PublicationAudience.vue';
 	import { useStoriesEditorStore } from '@D/store/stories/editor.store.js';
+	import { useStoriesEditorStore as useCreativeStoriesEditorStore } from '@M/store/stories/editor.store.js';
 	import { publicationManager } from '@/kernel/services/media/publications/index.js';
 	import { colibriEventBus } from '@/kernel/events/bus/index.js';
 	import { getStoryVideoClipCandidate, storyClipUploadOptions, STORY_VIDEO_CLIP_SECONDS } from '@/kernel/services/media/story-video-clip.js';
@@ -199,6 +200,7 @@
 	export default defineComponent({
 		setup: function() {
 			const storiesEditorStore = useStoriesEditorStore();
+			const creativeStoriesEditorStore = useCreativeStoriesEditorStore();
 			const stroyMediaFileInput = ref(null);
 			const storyTextInputField = ref(null);
 			const storyMediaVideoPreview = ref(null);
@@ -375,6 +377,10 @@
 				}
 
 				const clipCandidate = await getStoryVideoClipCandidate(file);
+				if(file instanceof Blob && (file.type.startsWith('image/') || file.type.startsWith('video/'))) {
+					creativeStoriesEditorStore.startCreativeDraft(file, clipCandidate);
+					return;
+				}
 
 				await uploadSelectedMedia(file, storyClipUploadOptions(clipCandidate));
 			};

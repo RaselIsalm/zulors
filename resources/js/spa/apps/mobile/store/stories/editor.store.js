@@ -132,6 +132,7 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 				clipCandidate: draft.clipCandidate || null,
 				legacyUploadOptions: draft.legacyUploadOptions || {},
 				exportMetadata: draft.exportMetadata || {},
+				scene: draft.scene || null,
 				edited: Boolean(draft.edited),
 				createdAt: draft.updatedAt || Date.now(),
 			};
@@ -257,7 +258,7 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			this.closeCreativeEditor();
 			this.persistCreativeDraft();
 		},
-		applyCreativeExport: function(mediaFile, exportMetadata = {}) {
+		applyCreativeExport: function(mediaFile, exportMetadata = {}, scene = null) {
 			if(! this.creativeDraft?.file || ! mediaFile) {
 				throw new Error('The story draft is no longer available.');
 			}
@@ -270,6 +271,7 @@ const useStoriesEditorStore = defineStore('mobile_stories_editor_store', {
 			this.creativeDraft.mime = mediaFile.type || this.creativeDraft.mime;
 			this.creativeDraft.name = mediaFile.name || this.creativeDraft.name;
 			this.creativeDraft.exportMetadata = { ...exportMetadata };
+			this.creativeDraft.scene = scene || this.creativeDraft.scene || null;
 			this.creativeDraft.edited = true;
 
 			if(previousObjectUrl && previousObjectUrl !== this.creativeDraft.sourceObjectUrl) {
