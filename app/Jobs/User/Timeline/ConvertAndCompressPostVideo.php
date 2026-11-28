@@ -31,6 +31,13 @@ class ConvertAndCompressPostVideo implements ShouldQueue
 {
     use Queueable;
 
+    /**
+     * A post can be deleted while its long-running video job is queued.
+     * Laravel should discard that stale job instead of recording a failed
+     * job when model restoration cannot find the post anymore.
+     */
+    public $deleteWhenMissingModels = true;
+
     public $timeout = (60 * 60 * 6); // 6 hours
 
     private $postData;
