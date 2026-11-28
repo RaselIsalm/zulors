@@ -24,10 +24,14 @@ for(const platform of Object.values(platforms)) {
         assert.match(publication.script.content, /rootMargin: '1200px 0px'/);
         assert.match(player.template.content, /preload="metadata"/);
 		assert.match(player.template.content, /state\.showBufferIndicator/);
+		assert.match(player.template.content, /v-if="thumbnailUrl && !state\.hasVisualFrame"/);
+		assert.match(player.template.content, /state\.hasVisualFrame \? 'relative z-0 opacity-100' : 'relative z-0 opacity-0'/);
 		assert.doesNotMatch(player.template.content, /state\.playRequested && !state\.isPlaying/);
 		assert.match(player.template.content, /v-on:waiting="handleVideoWaiting"/);
         assert.doesNotMatch(player.template.content, /<video[^>]+(?:src|v-bind:src)=/);
         assert.match(player.script.content, /createAdaptiveVideoPlaybackController/);
+		assert.match(player.script.content, /requestVideoFrameCallback/);
+		assert.match(player.script.content, /state\.hasVisualFrame = false/);
 		assert.match(player.script.content, /REEL_STARTUP_BUFFER_SECONDS/);
 		assert.match(player.script.content, /REEL_STARTUP_HD_WAIT_MS/);
 		assert.match(player.script.content, /REEL_STALL_INDICATOR_DELAY_MS/);

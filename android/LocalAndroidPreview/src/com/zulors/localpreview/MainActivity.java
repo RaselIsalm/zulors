@@ -1230,7 +1230,7 @@ public class MainActivity extends Activity {
                     scheduleMainFrameLoadTimeout(url);
                 }
                 if (uploadBridge != null) uploadBridge.pageStarted(url);
-                if (isAccountCreationHandoffUrl(url)) {
+                if (isAccountCreationHandoffUrl(url) || isAuthenticationEntryUrl(url)) {
                     flushCookiesAfterAuthHandoff = true;
                 }
                 recordStartupEvent("page_started", url);
@@ -1256,7 +1256,9 @@ public class MainActivity extends Activity {
                 installAndroidViewportGuards(view);
                 syncSystemChromeWithPage(view);
 
-                if (flushCookiesAfterAuthHandoff && isTrustedWebUrl(Uri.parse(url))) {
+                if (flushCookiesAfterAuthHandoff
+                        && isTrustedWebUrl(Uri.parse(url))
+                        && !isAuthenticationEntryUrl(url)) {
                     // Persist session and remember-me cookies before the user
                     // leaves the page or the app is suspended after sign-in.
                     CookieManager.getInstance().flush();
@@ -1548,6 +1550,21 @@ public class MainActivity extends Activity {
         return path != null
             && (path.startsWith("/auth/confirm-signup/")
                 || path.equals("/social-login/callback/google"));
+    }
+
+    private boolean isAuthenticationEntryUrl(String url) {
+        if (url == null) {
+            return false;
+        }
+
+        Uri uri = Uri.parse(url);
+        if (!isTrustedWebUrl(uri)) {
+            return false;
+        }
+
+        String path = uri.getPath();
+
+        return "/auth/login".equals(path) || "/auth/signup".equals(path);
     }
 
     private boolean shouldStartNativeGoogleSignIn(Uri uri) {

@@ -101,3 +101,15 @@ for(const platform of ['mobile', 'desktop']) {
         assert.doesNotMatch(source, /\[401,\s*403,\s*419\]\.includes\(statusCode\)/);
     });
 }
+
+test('Android WebView flushes cookies after successful password and Google auth handoffs', async () => {
+    const source = await readFile(new URL(
+        '../../android/LocalAndroidPreview/src/com/zulors/localpreview/MainActivity.java',
+        import.meta.url
+    ), 'utf8');
+
+    assert.match(source, /isAccountCreationHandoffUrl\(url\) \|\| isAuthenticationEntryUrl\(url\)/);
+    assert.match(source, /"\/auth\/login"\.equals\(path\) \|\| "\/auth\/signup"\.equals\(path\)/);
+    assert.match(source, /flushCookiesAfterAuthHandoff\s*&&\s*isTrustedWebUrl\(Uri\.parse\(url\)\)\s*&&\s*!isAuthenticationEntryUrl\(url\)/);
+    assert.match(source, /CookieManager\.getInstance\(\)\.flush\(\)/);
+});

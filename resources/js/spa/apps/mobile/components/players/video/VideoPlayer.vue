@@ -1,11 +1,18 @@
 <template>
 	<div
 		v-bind:style="playerFrameStyle"
-	class="relative flex w-full justify-center cursor-pointer group bg-black overflow-hidden">
+	class="relative flex w-full justify-center cursor-pointer group bg-slate-950 overflow-hidden">
 		<img v-if="sponsoredFeed && thumbnailUrl" v-bind:src="thumbnailUrl" alt="" aria-hidden="true" class="pointer-events-none absolute inset-0 size-full scale-110 object-cover blur-2xl opacity-70">
+		<img
+			v-if="thumbnailUrl && !state.hasVisualFrame"
+			v-bind:src="thumbnailUrl"
+			alt=""
+			aria-hidden="true"
+			class="pointer-events-none absolute inset-0 z-10 size-full object-contain bg-slate-950"
+		>
 		<video
 			v-on:click="handleVideoSurfaceClick"
-			v-bind:class="{ 'relative z-10': sponsoredFeed }"
+			v-bind:class="state.hasVisualFrame ? 'relative z-0 opacity-100' : 'relative z-0 opacity-0'"
 			ref="videoPlayerRef"
 			webkit-playsinline
 			playsinline
@@ -17,14 +24,14 @@
 			v-on:waiting="handleVideoWaiting"
 			v-on:stalled="handleVideoWaiting"
 			v-on:progress="handlePlaybackProgress"
-		class="size-full object-contain"
+		class="size-full object-contain transition-opacity duration-100"
 		>
 		</video>
 		<div v-if="state.showBufferIndicator" class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center" aria-live="polite" aria-label="Video buffering">
 			<div class="size-10 rounded-full border-4 border-white/35 border-t-white animate-spin"></div>
 		</div>
 
-		<div class="from-black/60 to-transparent bg-linear-to-t absolute bottom-0 left-0 right-0 px-2 pb-2 pt-6">
+		<div class="from-black/60 to-transparent bg-linear-to-t absolute bottom-0 left-0 right-0 z-20 px-2 pb-2 pt-6">
             <div
 				role="slider"
 				tabindex="0"
@@ -179,6 +186,7 @@
 			let playbackSuspended = false;
 			let playAttemptId = 0;
 			let playPromisePending = false;
+			let frameCallbackId = null;
 			let startupBufferTimer = null;
 			let bufferingGraceTimer = null;
 			let startupQualityFallbackApplied = false;
@@ -201,6 +209,7 @@
 				playRequested: false,
 				showBufferIndicator: false,
 				hasStartedPlayback: false,
+				hasVisualFrame: false,
 				progressBar: 0,
 				bufferedBar: 0,
 				playbackTime: 0,
@@ -376,6 +385,8 @@
 				}
 
 				clearStartupBufferTimer();
+				cancelVisualFrameCallback();
+				state.hasVisualFrame = false;
 				startupQualityFallbackApplied = false;
 				state.hasStartedPlayback = false;
 				state.showBufferIndicator = false;
@@ -407,8 +418,37 @@
 				syncPlaybackCandidate();
 			});
 
+			const cancelVisualFrameCallback = () => {
+				if(frameCallbackId !== null && videoPlayerRef.value?.cancelVideoFrameCallback) {
+					videoPlayerRef.value.cancelVideoFrameCallback(frameCallbackId);
+				}
+				frameCallbackId = null;
+			};
+
+			const revealVideoAfterDecodedFrame = () => {
+				const videoElement = videoPlayerRef.value;
+				if(! videoElement || state.hasVisualFrame || videoElement.readyState < 2 || ! videoElement.videoWidth) {
+					return;
+				}
+
+				if(typeof videoElement.requestVideoFrameCallback === 'function') {
+					if(frameCallbackId !== null) {
+						return;
+					}
+
+					frameCallbackId = videoElement.requestVideoFrameCallback(() => {
+						frameCallbackId = null;
+						state.hasVisualFrame = true;
+					});
+					return;
+				}
+
+				state.hasVisualFrame = true;
+			};
+
 			const handleVideoReady = () => {
 				state.isLoaded = true;
+				revealVideoAfterDecodedFrame();
 				updatePresentationMetadata();
 				syncProgressFromVideo();
 				syncPlaybackCandidate();
@@ -438,6 +478,7 @@
 					videoPlayerRef.value.addEventListener('loadedmetadata', handleVideoReady);
 					videoPlayerRef.value.addEventListener('canplay', handleVideoReady);
 					videoPlayerRef.value.addEventListener('durationchange', handleVideoReady);
+					videoPlayerRef.value.addEventListener('loadeddata', revealVideoAfterDecodedFrame);
 					videoPlayerRef.value.addEventListener('progress', handlePlaybackProgress);
 					playbackController = createAdaptiveVideoPlaybackController(videoPlayerRef.value);
 					playbackController.setCallbacks({ onBuffer: handlePlaybackProgress });
@@ -455,6 +496,7 @@
 					videoPlayerRef.value.removeEventListener('loadedmetadata', handleVideoReady);
 					videoPlayerRef.value.removeEventListener('canplay', handleVideoReady);
 					videoPlayerRef.value.removeEventListener('durationchange', handleVideoReady);
+					videoPlayerRef.value.removeEventListener('loadeddata', revealVideoAfterDecodedFrame);
 					videoPlayerRef.value.removeEventListener('progress', handlePlaybackProgress);
 					flushVideoTelemetry('video_watch');
 					if(! playbackController?.isHandedOff()) {
@@ -463,6 +505,7 @@
 				}
 
 				stopProgressUpdater();
+				cancelVisualFrameCallback();
 				clearStartupBufferTimer();
 				clearBufferingGraceTimer();
 				if(playbackController?.isHandedOff()) {
@@ -593,6 +636,7 @@
 			};
 
 			const handleVideoPlaying = () => {
+				revealVideoAfterDecodedFrame();
 				const recovered = state.isBuffering && state.hasStartedPlayback;
 				if(state.stallStartedAt > 0) {
 					queueMetric('media_stall_duration', Math.min(600000, Math.max(0, performance.now() - state.stallStartedAt)), {
@@ -617,6 +661,8 @@
 					return;
 				}
 
+				cancelVisualFrameCallback();
+				state.hasVisualFrame = false;
 				state.isBuffering = true;
 				state.stallStartedAt = performance.now();
 				queueMetric('media_stall', 1, { category: 'feed', rendition: playbackController?.getHlsInstance?.() ? 'hls' : 'mp4' });

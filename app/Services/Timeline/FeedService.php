@@ -84,25 +84,46 @@ class FeedService
             }
         }
 
+        // A new account can have weak or misleading personalization signals
+        // (for example, events produced during onboarding). Never leave the
+        // first For You page empty while eligible public posts are available.
+        $usedLatestFallback = false;
+
+        if($type === self::TYPE_FOR_YOU && $page === 1 && $rankedPosts->isEmpty()) {
+            $fallbackPosts = $this->latestFeedPosts($user, self::TYPE_FOR_YOU, [
+                'fast_start' => true,
+                'refresh_reason' => 'open',
+            ], $perPage, 1);
+
+            if($fallbackPosts->isNotEmpty()) {
+                $fallbackPosts->each(fn(Post $post) => $post->setAttribute('candidate_source', 'latest'));
+                $rankedPosts = $fallbackPosts;
+                $candidateCount = $fallbackPosts->count();
+                $usedLatestFallback = true;
+            }
+        }
+
         $pagePosts = $rankedPosts->slice(($page - 1) * $perPage, $perPage)->values();
         $posts = $this->withProcessingPosts($user, $page, $pagePosts);
-        $sessionWindowSize = $this->feedRankingService->sessionWindowSize($type);
+        $sessionWindowSize = $usedLatestFallback ? 0 : $this->feedRankingService->sessionWindowSize($type);
         $snapshot = $this->feedSessionSnapshotService->remember($user, $type, $sessionId, $rankedPosts, $sessionWindowSize);
-        $mixStats = $this->mixStats($rankedPosts);
+        $mixStats = $usedLatestFallback ? [] : $this->mixStats($rankedPosts);
         $this->logFeedServed($user, $type, $filter, $page, $perPage, $candidateCount, $rankedPosts, $pagePosts, $mixStats, $snapshot);
 
         return new FeedResult($posts, $this->meta($type, [
-            'strategy' => $type === self::TYPE_FOLLOWING ? 'relationship_freshness_ranking' : $this->feedRankingService->rankVersion($type),
+            'strategy' => $usedLatestFallback
+                ? 'empty_ranked_feed_latest_fallback'
+                : ($type === self::TYPE_FOLLOWING ? 'relationship_freshness_ranking' : $this->feedRankingService->rankVersion($type)),
             'candidate_count' => $candidateCount,
-            'candidate_limit' => $candidateLimit,
-            'candidate_sources' => $rankedPosts->pluck('candidate_source')->filter()->unique()->values()->all(),
-            'rank_version' => $this->feedRankingService->rankVersion($type),
+            'candidate_limit' => $usedLatestFallback ? null : $candidateLimit,
+            'candidate_sources' => $usedLatestFallback ? ['latest'] : $rankedPosts->pluck('candidate_source')->filter()->unique()->values()->all(),
+            'rank_version' => $usedLatestFallback ? 'chronological_v1' : $this->feedRankingService->rankVersion($type),
             'feed_family' => $this->feedRankingService->feedFamily($type),
-            're_rank_allowed' => $this->feedRankingService->reRankAllowed($type) && $page === 1,
+            're_rank_allowed' => ! $usedLatestFallback && $this->feedRankingService->reRankAllowed($type) && $page === 1,
             'session_window_size' => $sessionWindowSize,
             'session_snapshot_size' => count(data_get($snapshot, 'post_ids', [])),
             'mix' => $mixStats,
-            'scored' => true,
+            'scored' => ! $usedLatestFallback,
             'page' => $page,
             'per_page' => $perPage,
             'session_id' => $sessionId,

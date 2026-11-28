@@ -16,10 +16,12 @@ use App\Models\Post;
 use App\Models\User;
 use App\Models\UserNotificationSettings;
 use App\Services\Timeline\UserInterestService;
+use App\Services\Timeline\CandidateGenerationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Mockery;
 use Tests\TestCase;
 
 class ColdStartTimelineFeedTest extends TestCase
@@ -63,6 +65,31 @@ class ColdStartTimelineFeedTest extends TestCase
         $postIds = array_column($response->json('data'), 'id');
 
         $this->assertContains($readerPost->id, $postIds);
+    }
+
+    public function test_empty_ranked_for_you_feed_falls_back_to_latest_public_posts(): void
+    {
+        Cache::flush();
+
+        $viewer = $this->createUser('empty-ranked-feed-viewer');
+        $author = $this->createUser('empty-ranked-feed-author');
+        $latestPost = $this->createPost($author, 'Latest fallback post', now());
+
+        $candidateGeneration = Mockery::mock(CandidateGenerationService::class, [app(UserInterestService::class)])
+            ->makePartial();
+        $candidateGeneration->shouldReceive('getCandidates')
+            ->once()
+            ->andReturn(collect());
+        $this->app->instance(CandidateGenerationService::class, $candidateGeneration);
+
+        $response = $this->actingAs($viewer)
+            ->withoutMiddleware()
+            ->getJson('/api/timeline/feed?type=for_you&refresh_reason=home_tap')
+            ->assertOk()
+            ->assertJsonPath('meta.feed.strategy', 'empty_ranked_feed_latest_fallback')
+            ->assertJsonPath('meta.feed.candidate_sources.0', 'latest');
+
+        $this->assertContains($latestPost->id, array_column($response->json('data'), 'id'));
     }
 
     public function test_fast_start_initial_feed_skips_ranking_for_personalized_users(): void
