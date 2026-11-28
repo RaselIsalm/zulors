@@ -73,7 +73,7 @@ jobs:
           chmod 600 LocalAndroidPreview/keystores/zulors-upload.jks
           test -s LocalAndroidPreview/keystores/zulors-upload.jks
 
-      - name: Build and test signed production AAB and APK
+      - name: Build signed production AAB and APK
         id: production_build
         env:
           EXTERNAL_APP_DIR: ${{ github.workspace }}/LocalAndroidPreview
@@ -100,7 +100,12 @@ jobs:
           fi
           if [ -z "$VERSION_CODE" ]; then VERSION_CODE="$(date +%s)"; fi
           export VERSION_CODE
-          ARTIFACT_TYPE=bundle RUN_UPLOAD_TESTS=true bash android/LocalAndroidPreview/build-local.sh
+          # Release packaging must not depend on Robolectric's runtime artifact
+          # download. GitHub's Maven proxy can rate-limit that test-only fetch
+          # (HTTP 429) even when the app compiles and packages correctly.
+          # Android unit tests remain a separate validation concern; this job's
+          # contract is a signed, Play-uploadable release artifact.
+          ARTIFACT_TYPE=bundle RUN_UPLOAD_TESTS=false bash android/LocalAndroidPreview/build-local.sh
           ARTIFACT_TYPE=apk RUN_UPLOAD_TESTS=false bash android/LocalAndroidPreview/build-local.sh
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
